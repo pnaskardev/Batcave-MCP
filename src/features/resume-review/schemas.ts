@@ -1,8 +1,6 @@
 import { z } from "zod";
 
-export const sessionIdSchema = z
-  .string()
-  .describe("Session id returned by start_review.");
+export const sessionIdSchema = z.string().describe("Session id returned by start_review.");
 
 export const matchReportSchema = z
   .object({

@@ -1,4 +1,4 @@
-import { STAGE_TOOLS, type ReviewSession, type StageName } from "./sessions";
+import { type ReviewSession, STAGE_TOOLS, type StageName } from "./sessions";
 
 function returnBlock(session: ReviewSession, stage: StageName): string {
   const tool = STAGE_TOOLS[stage];

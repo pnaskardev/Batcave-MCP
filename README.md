@@ -81,26 +81,40 @@ Nothing expires. Sessions accumulate until `delete_session` removes them.
 
 ```bash
 bun install
-export DB_URL='postgres://user:pass@host/db?sslmode=require'   # DATABASE_URL also accepted
-bun start          # stdio, for a client on this machine
-bun run serve      # HTTP on :3000, needs MCP_AUTH_TOKEN too
-bun run typecheck
-bun test           # unit tests; no database needed
+bun run dev        # Postgres + the server, hot reload, nothing to configure
 ```
 
-The end-to-end tests speak the real wire protocol against a real Postgres, and **drop their
-tables on teardown**. They read `TEST_DB_URL`, deliberately not `DB_URL`, so pointing the server
-at a real database cannot arm the teardown:
+That is `docker compose -f docker-compose.dev.yml up --build`: it brings up Postgres, creates the
+dev and test databases, runs the migrations, and serves MCP on `http://127.0.0.1:3000/mcp` with
+the token `dev-token-not-a-secret`. Editing anything under `src/` reloads the running server.
+
+To run the server directly on the host instead:
 
 ```bash
-docker run -d --name pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=batcave -p 55432:5432 postgres:16-alpine
-TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
+export DB_URL='postgres://postgres:postgres@localhost:55432/batcave'
+bun start          # stdio, for a client on this machine
+bun run serve      # HTTP on :3000, also needs MCP_AUTH_TOKEN
 ```
 
-`.mcp.json` in this directory registers the server for Claude Code. For another client:
+Checks:
+
+```bash
+bun run check      # Biome format + lint  (check:fix to apply)
+bun run typecheck
+bun test           # unit tests; no database needed
+
+TEST_DB_URL='postgres://postgres:postgres@localhost:55432/batcave_test' bun test
+```
+
+The end-to-end tests speak the real wire protocol against a real Postgres and **drop their tables
+on teardown**. They read `TEST_DB_URL`, deliberately not `DB_URL`, so pointing the server at a
+real database cannot arm the teardown — and the dev stack ships a separate `batcave_test`
+database so running tests never disturbs a server you have running.
+
+`.mcp.json` in this directory registers the stdio server for Claude Code. For another client:
 
 ```json
-{ "command": "bun", "args": ["index.ts"], "cwd": "/home/jarvis/Work/personal/Batcave" }
+{ "command": "bun", "args": ["index.ts"], "cwd": "/path/to/Batcave" }
 ```
 
 ## Running it on EC2
@@ -131,12 +145,8 @@ sessions apart from a friend's. Per-user access needs real auth and an owner col
 their laptop mean nothing to the server. Over HTTP, pass `resume_text` and
 `job_description_text`. Mount a volume if you want the path form to work for files on the box.
 
-For local development the compose file also carries a Postgres, off by default:
-
-```bash
-docker compose --profile dev up -d postgres
-TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
-```
+`docker-compose.yml` is the production stack only. Local development uses
+`docker-compose.dev.yml`, which brings its own Postgres and shares none of this configuration.
 
 ## Layout
 
@@ -201,3 +211,12 @@ That is the whole contract. Migrations are applied once each, tracked per module
 `schema_migrations`, and run lazily the first time that module touches the database — an
 unused module costs no round trips. `tests/modules.test.ts` exercises the seam with a stub
 module that has nothing to do with resumes.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — `bun run dev` is the whole setup. Security issues go
+through [SECURITY.md](SECURITY.md), not public issues.
+
+## License
+
+[MIT](LICENSE).
