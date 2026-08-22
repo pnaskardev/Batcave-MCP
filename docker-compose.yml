@@ -1,6 +1,15 @@
+# Production stack. For local development use docker-compose.dev.yml, which brings its own
+# Postgres and needs no configuration.
+#
+#   export DB_URL='postgres://user:pass@host/db?sslmode=require'
+#   export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+#   docker compose up -d --build
+
 services:
   mcp:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: batcave-mcp
     restart: unless-stopped
     # Bound to loopback on purpose. The endpoint speaks plaintext HTTP and authenticates with a
@@ -23,25 +32,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  # Local Postgres for development and for the end-to-end tests. Not started by default, and
-  # has no business on the EC2 box: `docker compose --profile dev up -d postgres`.
-  postgres:
-    profiles: [dev]
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test}
-      POSTGRES_DB: batcave
-    ports:
-      - "127.0.0.1:55432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  postgres-data:

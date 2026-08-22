@@ -1,0 +1,57 @@
+# Local development stack: Postgres plus the MCP server running against it.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Nothing here needs configuring — the credentials below are local-only fixtures, not secrets,
+# so a first-time contributor can clone the repo and get a working server in one command.
+# docker-compose.yml is the production stack and shares none of this.
+
+name: batcave-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: batcave
+    # Published so `bun test` on the host can use this database too — see CONTRIBUTING.md.
+    # 55432 rather than 5432 to avoid colliding with a Postgres already on the machine.
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Creates the separate `batcave_test` database on first boot. Only runs when the volume
+      # is empty: after changing it, `docker compose -f docker-compose.dev.yml down -v`.
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d batcave"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mcp:
+    build:
+      context: .
+      target: dev
+    command: ["bun", "--hot", "serve.ts"]
+    # Waits for Postgres to accept connections, so a fresh `up` never races the first migration.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: postgres://postgres:postgres@postgres:5432/batcave
+      # A fixed local token: every contributor's client is configured the same way, and there is
+      # nothing here worth protecting. Production generates a real one — see README.
+      MCP_AUTH_TOKEN: dev-token-not-a-secret
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    # Source only. node_modules stays as the image installed it, so a host install for a
+    # different platform cannot leak into the container.
+    volumes:
+      - ./src:/app/src:ro
+      - ./serve.ts:/app/serve.ts:ro
+      - ./index.ts:/app/index.ts:ro
+
+volumes:
+  postgres-data:
