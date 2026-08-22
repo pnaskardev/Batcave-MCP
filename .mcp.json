@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "batcave-resume": {
+      "command": "bun",
+      "args": ["index.ts"],
+      "cwd": "/home/jarvis/Work/personal/Batcave"
+    }
+  }
+}
