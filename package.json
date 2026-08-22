@@ -26,6 +26,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun scripts/migrate.ts",
     "db:check": "bun scripts/check-db.ts",
+    "preflight": "bun scripts/preflight.ts",
     "check": "biome check",
     "check:fix": "biome check --write",
     "typecheck": "tsc --noEmit",

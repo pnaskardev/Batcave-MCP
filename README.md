@@ -72,8 +72,8 @@ drizzle.__drizzle_migrations                  -- drizzle's journal, one for the 
 
 Two tables rather than one document, so recording a stage writes one row instead of rewriting
 both resumes, and `list_sessions` never selects the document text at all. Tables are prefixed by
-module, and migrations run lazily on that module's first query — starting the server does not
-wake the database.
+module so two modules cannot collide, and the connection is opened lazily on the first query —
+starting the server does not wake the database.
 
 Tables are defined once, in each module's `schema.ts`, using Drizzle. `bun run db:generate` diffs
 those definitions against `drizzle/` and writes the migration; `bun run db:migrate` applies what
@@ -108,6 +108,7 @@ bun run serve      # HTTP on :3000, also needs MCP_AUTH_TOKEN
 Two database commands, neither of which needs the server running:
 
 ```bash
+bun run preflight     # is THIS machine configured to serve? (run it on the EC2 box)
 bun run db:check      # can this machine reach DB_URL, and what is in it?
 bun run db:generate   # schema.ts changed -> write a migration into drizzle/
 bun run db:migrate    # apply pending migrations; safe to run repeatedly
@@ -143,11 +144,19 @@ database so running tests never disturbs a server you have running.
 export DB_URL='postgres://user:pass@host/db?sslmode=require'
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 
-bun run db:check                       # confirm the instance is reachable from this box
-docker compose run --rm mcp bun scripts/migrate.ts   # create the tables
+docker compose run --rm mcp bun scripts/preflight.ts  # config, database, auth path
+docker compose run --rm mcp bun scripts/migrate.ts    # apply pending migrations
 docker compose up -d --build
 docker compose logs -f mcp
 ```
+
+**Bun is not needed on the server** — the image carries it, so every command above runs through
+`docker compose run`. Install Bun on the box only if you want the shorter `bun run preflight` /
+`bun run db:migrate` forms.
+
+`preflight` boots the real entrypoint on a spare port, checks that an unauthenticated request is
+rejected and the configured token is accepted, then shuts it down. It reports credentials by
+length only, never by value, and exits non-zero so it can gate a deploy.
 
 **Migrate before the server takes traffic.** It will migrate itself on the first tool call if you
 skip this, but then a broken migration surfaces as a failed user request rather than a failed

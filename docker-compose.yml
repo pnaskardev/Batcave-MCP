@@ -1,5 +1,6 @@
-# Production stack. For local development use docker-compose.dev.yml, which brings its own
-# Postgres and needs no configuration.
+# Production stack. TLS is terminated by something in front of this — a Caddy or nginx already
+# installed on the host, or an ALB. See README, "Running it on EC2".
+# For local development use docker-compose.dev.yml, which brings its own Postgres.
 #
 #   export DB_URL='postgres://user:pass@host/db?sslmode=require'
 #   export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
@@ -12,10 +13,9 @@ services:
       target: runtime
     image: batcave-mcp
     restart: unless-stopped
-    # Bound to loopback on purpose. The endpoint speaks plaintext HTTP and authenticates with a
-    # bearer token, which is only safe behind something that terminates TLS — an ALB, or nginx
-    # or Caddy on the same box. Publish it on 0.0.0.0 and the token crosses the internet in
-    # clear text. See README, "Running it on EC2".
+    # Loopback only — whatever terminates TLS on this host reaches it here. The app speaks
+    # plaintext HTTP and authenticates with a bearer token, so it must never be published
+    # on 0.0.0.0.
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     environment:
