@@ -75,6 +75,10 @@ both resumes, and `list_sessions` never selects the document text at all. Tables
 module, and migrations run lazily on that module's first query — starting the server does not
 wake the database.
 
+Migrations are append-only and recorded in `schema_migrations`, so each runs exactly once per
+database. `bun run db:migrate` applies what is pending; the server also does it lazily on a
+module's first query as a fallback.
+
 Nothing expires. Sessions accumulate until `delete_session` removes them.
 
 ## Running it
@@ -95,6 +99,16 @@ export DB_URL='postgres://postgres:postgres@localhost:55432/batcave'
 bun start          # stdio, for a client on this machine
 bun run serve      # HTTP on :3000, also needs MCP_AUTH_TOKEN
 ```
+
+Two database commands, neither of which needs the server running:
+
+```bash
+bun run db:check      # can this machine reach DB_URL, and what is in it?
+bun run db:migrate    # create or update the tables; safe to run repeatedly
+```
+
+`db:check` is the only thing that opens a connection without serving. Both entrypoints validate
+`DB_URL` at startup but connect lazily on the first query, so a clean start proves nothing.
 
 Checks:
 
@@ -123,9 +137,16 @@ database so running tests never disturbs a server you have running.
 export DB_URL='postgres://user:pass@host/db?sslmode=require'
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 
+bun run db:check                       # confirm the instance is reachable from this box
+docker compose run --rm mcp bun scripts/migrate.ts   # create the tables
 docker compose up -d --build
 docker compose logs -f mcp
 ```
+
+**Migrate before the server takes traffic.** It will migrate itself on the first tool call if you
+skip this, but then a broken migration surfaces as a failed user request rather than a failed
+deploy, and the first caller waits for the schema. Re-run `db:migrate` on every deploy that ships
+a new migration; it is a no-op when there is nothing to apply.
 
 Compose refuses to start if either variable is unset. Keep them in the shell profile or an
 instance secret — not in a file in this repo.

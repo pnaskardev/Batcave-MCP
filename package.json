@@ -21,6 +21,8 @@
     "start": "bun index.ts",
     "serve": "bun serve.ts",
     "dev": "docker compose -f docker-compose.dev.yml up --build",
+    "db:migrate": "bun scripts/migrate.ts",
+    "db:check": "bun scripts/check-db.ts",
     "check": "biome check",
     "check:fix": "biome check --write",
     "typecheck": "tsc --noEmit",

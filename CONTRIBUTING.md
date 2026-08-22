@@ -42,7 +42,7 @@ To point a local MCP client at the code instead, run the stdio entrypoint — se
 bun install
 bun run check        # Biome format + lint
 bun run typecheck
-bun test             # unit tests only
+bun test             # unit tests only; database tests skip
 
 TEST_DB_URL='postgres://postgres:postgres@localhost:55432/batcave_test' bun test
 ```
@@ -52,6 +52,11 @@ TEST_DB_URL='postgres://postgres:postgres@localhost:55432/batcave_test' bun test
 **Use `batcave_test`, not `batcave`.** The end-to-end suite drops its tables on teardown, so
 pointing it at the dev database would pull the schema out from under a server you have running.
 The two databases exist for exactly this reason.
+
+Tests can only ever reach `TEST_DB_URL`. `tests/setup.ts` runs before every test file and
+overwrites `DB_URL` with it — Bun autoloads `.env`, so without that a contributor with a real
+connection string in `.env` would have the suite dropping tables in their own database. If a test
+needs a database, gate it on `TEST_DB_URL` and skip when it is unset; never read `DB_URL`.
 
 CI runs all of the above on every pull request, plus a build of the production Docker image.
 
@@ -71,7 +76,7 @@ Two boundaries to respect:
 
 Schema changes are append-only migrations in the module's `migrations.ts`. Never edit a migration
 that has already shipped — its id is recorded in `schema_migrations` and it will not run again.
-Add a new one.
+Add a new one, then apply it with `bun run db:migrate`.
 
 ## Style
 

@@ -1,5 +1,11 @@
 .git
 .gitignore
+
+# Secrets. The dev stage does `COPY . .`, so without this the connection string in .env is
+# baked into an image layer and readable with `docker history`.
+.env
+.env.*
+
 .mcp.json
 node_modules
 tests

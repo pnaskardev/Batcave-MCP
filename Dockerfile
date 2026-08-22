@@ -22,6 +22,7 @@ ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json serve.ts index.ts ./
 COPY src ./src
+COPY scripts ./scripts
 
 # The base image ships a non-root `bun` user; nothing here needs to write to the filesystem.
 USER bun

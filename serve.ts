@@ -1,5 +1,6 @@
 import { createFetchHandler } from "./src/http";
 import { modules } from "./src/modules";
+import { assertConfigured } from "./src/platform/db";
 
 function required(name: string, hint: string): string {
   const value = process.env[name];
@@ -12,7 +13,7 @@ const authToken = required(
   "Every request must present it as `Authorization: Bearer <token>`. " +
     "Generate one with `openssl rand -hex 32`.",
 );
-required("DB_URL", "Point it at your Postgres instance.");
+assertConfigured();
 
 const port = Number(process.env.PORT ?? 3000);
 const hostname = process.env.HOST ?? "0.0.0.0";

@@ -2,9 +2,9 @@ import { afterAll, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { schemaFor, sql } from "../src/platform/db";
 
+// tests/setup.ts has already pointed DB_URL at TEST_DB_URL, or at nothing.
 const TEST_DB_URL = process.env.TEST_DB_URL;
 const dbTest = TEST_DB_URL ? test : test.skip;
-if (TEST_DB_URL) process.env.DB_URL = TEST_DB_URL;
 
 const MODULE = "migrationprobe";
 
