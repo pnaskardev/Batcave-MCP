@@ -43,14 +43,17 @@ Everything lives in Postgres. The server writes nothing to local disk — the on
 the resume and job-description files you point it at.
 
 ```
-sessions(id, created_at, updated_at, company, role, resume jsonb, job_description jsonb)
-stages(session_id -> sessions.id on delete cascade, stage, status,
-       issued_at, completed_at, result jsonb, primary key (session_id, stage))
+resume_sessions(id, created_at, updated_at, company, role,
+                resume jsonb, job_description jsonb)
+resume_stages(session_id -> resume_sessions.id on delete cascade, stage, status,
+              issued_at, completed_at, result jsonb, primary key (session_id, stage))
+schema_migrations(module, id, applied_at)     -- shared, owned by src/platform/db.ts
 ```
 
 Two tables rather than one document, so recording a stage writes one row instead of rewriting
-both resumes, and `list_sessions` never selects the document text at all. Schema is created on
-first use with `IF NOT EXISTS`, lazily — starting the server does not wake the database.
+both resumes, and `list_sessions` never selects the document text at all. Tables are prefixed by
+module, and migrations run lazily on that module's first query — starting the server does not
+wake the database.
 
 Nothing expires. Sessions accumulate until `delete_session` removes them.
 
@@ -81,12 +84,61 @@ TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
 
 ## Layout
 
+The server is a host for **modules**. A module is one self-contained family of tools that owns
+its own tables and its own vocabulary. Resume review is the only one today; a second, unrelated
+one is a folder under `src/features/` and one entry in the list in `index.ts`.
+
 ```
-index.ts              server bootstrap, stdio transport
-src/store.ts          Postgres-backed sessions and stage gating
-src/documents.ts      text / pdf / docx extraction
-src/schemas.ts        zod schemas for each stage's result
-src/stages.ts         the three briefs
-src/tools/pipeline.ts start_review and the three chained stage tools
-src/tools/support.ts  status, listing, dossier export, deletion
+index.ts                          createServer([resumeReview]) and connect stdio
+src/module.ts                     the ToolModule contract every feature implements
+src/server.ts                     mounts modules onto an McpServer
+src/platform/                     feature-agnostic; knows nothing about resumes
+  db.ts                             lazy Postgres pool + per-module migration runner
+  documents.ts                      text / pdf / docx extraction
+  stored-document.ts                what an extracted document looks like
+  tool-result.ts                    keeps `content` and `structuredContent` in step
+src/features/resume-review/
+  index.ts                          the ToolModule: name, migrations, register()
+  migrations.ts                     this module's tables
+  sessions.ts                       repository, domain types, stage gating
+  briefs.ts                         the three briefs
+  schemas.ts                        zod schema per stage result
+  stage-tool.ts                     the brief-then-record tool shape
+  dossier.ts                        markdown rendering
+  tools/                            one file per group of registered tools
+    intake.ts, stages.ts, dossier.ts, session-admin.ts
 ```
+
+Two rules hold the structure up:
+
+- **`src/platform` never imports from `src/features`.** Anything a second module would also want
+  belongs in platform; anything only resume review wants stays in the feature.
+- **No module imports another module.** Two modules that need to know about each other are one
+  module.
+
+`stage-tool.ts` deliberately lives inside the feature rather than in platform. The
+brief-then-record shape might turn out to be reusable, but it has exactly one consumer today,
+and guessing at the general case before a second one exists is how a platform layer rots.
+
+## Adding a module
+
+```ts
+// src/features/interview-prep/index.ts
+export const interviewPrep: ToolModule = {
+  name: "interview-prep",
+  migrations,                       // its own tables, namespaced in schema_migrations
+  register(server) {
+    registerWhateverTools(server);
+  },
+};
+```
+
+```ts
+// index.ts
+const server = createServer([resumeReview, interviewPrep]);
+```
+
+That is the whole contract. Migrations are applied once each, tracked per module in
+`schema_migrations`, and run lazily the first time that module touches the database — an
+unused module costs no round trips. `tests/modules.test.ts` exercises the seam with a stub
+module that has nothing to do with resumes.

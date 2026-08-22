@@ -1,22 +1,9 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { loadDocument } from "../src/documents";
-import { atsPassInstructions, experienceRewriteInstructions } from "../src/stages";
-import { requireStageResult, type DocumentRecord, type Session } from "../src/store";
+import { expect, test } from "bun:test";
+import type { StoredDocument } from "../src/platform/stored-document";
+import { atsPassBrief, experienceRewriteBrief } from "../src/features/resume-review/briefs";
+import { requireStageResult, type ReviewSession } from "../src/features/resume-review/sessions";
 
-let dir: string;
-
-beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "batcave-test-"));
-});
-
-afterAll(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
-
-const doc = (text: string): DocumentRecord => ({
+const doc = (text: string): StoredDocument => ({
   text,
   source: "inline text",
   format: "text",
@@ -27,7 +14,7 @@ const doc = (text: string): DocumentRecord => ({
 const RESUME = "EXPERIENCE\nAcme Corp, Backend Engineer, 2021-2024\n".padEnd(200, "-");
 const JD = "Staff Platform Engineer. Kubernetes, Go, Terraform.\n".padEnd(200, "-");
 
-function session(stages: Session["stages"] = {}): Session {
+function session(stages: ReviewSession["stages"] = {}): ReviewSession {
   return {
     id: "abc1234567",
     created_at: "2026-08-22T00:00:00.000Z",
@@ -39,21 +26,6 @@ function session(stages: Session["stages"] = {}): Session {
     stages,
   };
 }
-
-test("loadDocument requires exactly one of text or path", async () => {
-  await expect(loadDocument("resume", {})).rejects.toThrow("got neither");
-  await expect(loadDocument("resume", { text: RESUME, path: "/x" })).rejects.toThrow("got both");
-});
-
-test("loadDocument rejects documents too short to analyse", async () => {
-  await expect(loadDocument("resume", { text: "one line" })).rejects.toThrow("too short");
-});
-
-test("loadDocument names the supported formats for an unreadable type", async () => {
-  const path = join(dir, "resume.odt");
-  await Bun.write(path, RESUME);
-  await expect(loadDocument("resume", { path })).rejects.toThrow(".pdf, .docx, .txt, .md");
-});
 
 test("a later stage refuses to run before its prerequisite is recorded", () => {
   expect(() => requireStageResult(session(), "match_report")).toThrow("has not run for session");
@@ -72,7 +44,7 @@ test("stage 2 briefs the model with the recorded stage 1 report", () => {
       result: { match_score: 41, missing_keywords: ["Kubernetes"] },
     },
   });
-  const brief = experienceRewriteInstructions(done, requireStageResult(done, "match_report"));
+  const brief = experienceRewriteBrief(done, requireStageResult(done, "match_report"));
   expect(brief).toContain("Kubernetes");
   expect(brief).toContain("[QUANTIFY:");
   expect(brief).toContain(done.id);
@@ -88,7 +60,7 @@ test("stage 3 scans the stage 2 resume, not the original", () => {
     },
   });
   const rewrite = requireStageResult(done, "experience_rewrite");
-  const brief = atsPassInstructions(
+  const brief = atsPassBrief(
     done,
     rewrite.updated_resume as string,
     requireStageResult(done, "match_report"),

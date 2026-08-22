@@ -120,13 +120,15 @@ export const atsPassSchema = z
   })
   .describe("Stage 3 output: ATS filter plus 200-resume hiring manager pass.");
 
-/** Every pipeline tool answers with the same envelope, in either of its two modes. */
+/** Every stage tool answers with the same envelope, in either of its two modes. */
 export const stageEnvelopeSchema = z.object({
   session_id: z.string(),
   stage: z.string(),
   mode: z
-    .enum(["instructions", "recorded"])
-    .describe("instructions: perform the analysis. recorded: your result was stored."),
-  instructions: z.string().optional(),
+    .enum(["brief", "recorded"])
+    .describe("brief: perform the analysis described. recorded: your result was stored."),
+  brief: z.string().optional(),
   next_step: z.string(),
 });
+
+export type StageEnvelope = z.infer<typeof stageEnvelopeSchema>;

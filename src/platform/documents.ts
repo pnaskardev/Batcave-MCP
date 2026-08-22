@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { extname, isAbsolute, resolve } from "node:path";
-import type { DocumentRecord } from "./store";
+import type { StoredDocument } from "./stored-document";
 
 const TEXT_EXTENSIONS = new Set([".txt", ".md", ".markdown", ".text", ".rtf", ""]);
 
@@ -50,7 +50,7 @@ function normalize(text: string): string {
 export async function loadDocument(
   label: string,
   input: { text?: string; path?: string },
-): Promise<DocumentRecord> {
+): Promise<StoredDocument> {
   const hasText = Boolean(input.text?.trim());
   const hasPath = Boolean(input.path?.trim());
   if (hasText === hasPath) {

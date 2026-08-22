@@ -1,6 +1,6 @@
-import { STAGE_TOOLS, type Session, type StageName } from "./store";
+import { STAGE_TOOLS, type ReviewSession, type StageName } from "./sessions";
 
-function returnBlock(session: Session, stage: StageName): string {
+function returnBlock(session: ReviewSession, stage: StageName): string {
   const tool = STAGE_TOOLS[stage];
   return [
     "## How to return your answer",
@@ -16,7 +16,7 @@ function fence(label: string, body: string): string {
   return `## ${label}\n\n\`\`\`\n${body}\n\`\`\``;
 }
 
-export function matchReportInstructions(session: Session): string {
+export function matchReportBrief(session: ReviewSession): string {
   return [
     `# Stage 1 — Recruiter match report (${session.role} @ ${session.company})`,
     "",
@@ -55,8 +55,8 @@ export function matchReportInstructions(session: Session): string {
   ].join("\n");
 }
 
-export function experienceRewriteInstructions(
-  session: Session,
+export function experienceRewriteBrief(
+  session: ReviewSession,
   matchReport: Record<string, unknown>,
 ): string {
   return [
@@ -95,8 +95,8 @@ export function experienceRewriteInstructions(
   ].join("\n");
 }
 
-export function atsPassInstructions(
-  session: Session,
+export function atsPassBrief(
+  session: ReviewSession,
   currentResume: string,
   matchReport: Record<string, unknown>,
 ): string {

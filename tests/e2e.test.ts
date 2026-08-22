@@ -80,7 +80,10 @@ afterAll(async () => {
   if (!DATABASE_URL) return;
   proc.kill();
   const sql = new SQL(DATABASE_URL);
-  await sql.unsafe("drop table if exists stages; drop table if exists sessions;");
+  await sql.unsafe(
+    "drop table if exists resume_stages; drop table if exists resume_sessions; " +
+      "drop table if exists schema_migrations;",
+  );
   await sql.close();
 });
 
@@ -91,9 +94,9 @@ dbTest("the server advertises the intake, the three stages, and the support tool
     "resume_match_report",
     "rewrite_experience_xyz",
     "ats_scroll_stopper_pass",
+    "export_dossier",
     "session_status",
     "list_sessions",
-    "export_dossier",
     "delete_session",
   ]);
 });
@@ -113,7 +116,7 @@ dbTest("the three stages chain through one session", async () => {
   expect(blocked.text).toContain("Call resume_match_report first");
 
   const brief = await callTool("resume_match_report", { session_id });
-  expect(brief.structured!.mode).toBe("instructions");
+  expect(brief.structured!.mode).toBe("brief");
   expect(brief.text).toContain("senior in-house recruiter at Wayne Enterprises");
 
   const thin = await callTool("resume_match_report", {
