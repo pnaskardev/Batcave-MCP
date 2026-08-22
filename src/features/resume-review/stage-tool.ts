@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { toolResult, type ToolResult } from "../../platform/tool-result";
+import { type ToolResult, toolResult } from "../../platform/tool-result";
 import { type StageEnvelope, stageEnvelopeSchema } from "./schemas";
 import {
   loadSession,

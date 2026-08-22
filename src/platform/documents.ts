@@ -40,7 +40,25 @@ async function extractFile(path: string): Promise<{ text: string; format: string
 }
 
 function normalize(text: string): string {
-  return text.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Trims a caller-supplied field down to a real value, treating whitespace as absent. */
+function present(value: string | undefined): string | undefined {
+  return value?.trim() ? value : undefined;
+}
+
+function describe(label: string, text: string, source: string, format: string): StoredDocument {
+  if (text.length < 120) {
+    throw new Error(
+      `Extracted only ${text.length} characters for ${label} from ${source}. ` +
+        `That is too short to analyse — the file may be image-only (scanned) or empty.`,
+    );
+  }
+  return { text, source, format, chars: text.length, words: text.split(/\s+/).length };
 }
 
 /**
@@ -51,36 +69,17 @@ export async function loadDocument(
   label: string,
   input: { text?: string; path?: string },
 ): Promise<StoredDocument> {
-  const hasText = Boolean(input.text?.trim());
-  const hasPath = Boolean(input.path?.trim());
-  if (hasText === hasPath) {
-    throw new Error(
-      `Provide exactly one of ${label}_text or ${label}_path (got ` +
-        `${hasText && hasPath ? "both" : "neither"}).`,
-    );
+  const text = present(input.text);
+  const path = present(input.path);
+  const bothOrNeither = `Provide exactly one of ${label}_text or ${label}_path`;
+
+  if (path !== undefined) {
+    if (text !== undefined) throw new Error(`${bothOrNeither} (got both).`);
+    const resolved = expandPath(path);
+    const extracted = await extractFile(resolved);
+    return describe(label, normalize(extracted.text), resolved, extracted.format);
   }
 
-  let text: string;
-  let source: string;
-  let format: string;
-  if (hasPath) {
-    const path = expandPath(input.path!);
-    const extracted = await extractFile(path);
-    text = normalize(extracted.text);
-    source = path;
-    format = extracted.format;
-  } else {
-    text = normalize(input.text!);
-    source = "inline text";
-    format = "text";
-  }
-
-  if (text.length < 120) {
-    throw new Error(
-      `Extracted only ${text.length} characters for ${label} from ${source}. ` +
-        `That is too short to analyse — the file may be image-only (scanned) or empty.`,
-    );
-  }
-
-  return { text, source, format, chars: text.length, words: text.split(/\s+/).length };
+  if (text === undefined) throw new Error(`${bothOrNeither} (got neither).`);
+  return describe(label, normalize(text), "inline text", "text");
 }

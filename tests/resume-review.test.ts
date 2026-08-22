@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import type { StoredDocument } from "../src/platform/stored-document";
 import { atsPassBrief, experienceRewriteBrief } from "../src/features/resume-review/briefs";
-import { requireStageResult, type ReviewSession } from "../src/features/resume-review/sessions";
+import { type ReviewSession, requireStageResult } from "../src/features/resume-review/sessions";
+import type { StoredDocument } from "../src/platform/stored-document";
 
 const doc = (text: string): StoredDocument => ({
   text,

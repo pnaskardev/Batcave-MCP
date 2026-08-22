@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { atsPassBrief, experienceRewriteBrief, matchReportBrief } from "../briefs";
 import { atsPassSchema, experienceRewriteSchema, matchReportSchema } from "../schemas";
-import { registerStage } from "../stage-tool";
 import { requireStageResult } from "../sessions";
+import { registerStage } from "../stage-tool";
 
 export function registerStageTools(server: McpServer): void {
   registerStage(server, {

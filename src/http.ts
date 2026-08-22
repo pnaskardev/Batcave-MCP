@@ -1,5 +1,5 @@
-import { createMcpHandler } from "@modelcontextprotocol/server";
 import { timingSafeEqual } from "node:crypto";
+import { createMcpHandler } from "@modelcontextprotocol/server";
 import type { ToolModule } from "./module";
 import { createServer } from "./server";
 

@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "devDependencies": {
+    "@biomejs/biome": "2.5.10",
     "@types/bun": "latest",
     "@types/node": "^26.2.0"
   },
@@ -19,8 +20,15 @@
   "scripts": {
     "start": "bun index.ts",
     "serve": "bun serve.ts",
-    "test": "bun test",
-    "test:e2e": "TEST_DB_URL=${TEST_DB_URL:?point at a THROWAWAY database, the suite drops its tables} bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "dev": "docker compose -f docker-compose.dev.yml up --build",
+    "check": "biome check",
+    "check:fix": "biome check --write",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pnaskardev/Batcave-MCP.git"
   }
 }

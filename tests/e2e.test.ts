@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { SQL } from "bun";
-import type { Subprocess } from "bun";
 import { join } from "node:path";
+import type { Subprocess } from "bun";
+import { SQL } from "bun";
 
 // These exercise the real wire protocol against a real Postgres. TEST_DB_URL must point at a
 // THROWAWAY database — the suite drops its tables on the way out. It is deliberately not
@@ -19,11 +19,18 @@ const JD =
   "Staff Platform Engineer at Wayne Enterprises. Own our Kubernetes platform, drive Go " +
   "services, run Terraform on AWS, and improve observability with Prometheus. SLO ownership.";
 
+/** Just enough of a JSON-RPC response for these tests to assert on. */
+interface RpcResponse {
+  id?: number;
+  result?: Record<string, unknown>;
+  error?: unknown;
+}
+
 let proc: Subprocess<"pipe", "pipe", "inherit">;
 let nextId = 1;
-const pending = new Map<number, (value: Record<string, any>) => void>();
+const pending = new Map<number, (value: RpcResponse) => void>();
 
-function send(method: string, params?: unknown): Promise<Record<string, any>> {
+function send(method: string, params?: unknown): Promise<RpcResponse> {
   const id = nextId++;
   return new Promise((resolve) => {
     pending.set(id, resolve);
@@ -32,14 +39,29 @@ function send(method: string, params?: unknown): Promise<Record<string, any>> {
   });
 }
 
-async function callTool(name: string, args: Record<string, unknown>) {
+interface ToolCall {
+  isError: boolean;
+  text: string;
+  structured: Record<string, unknown> | undefined;
+}
+
+async function callTool(name: string, args: Record<string, unknown>): Promise<ToolCall> {
   const response = await send("tools/call", { name, arguments: args });
   const result = response.result ?? {};
+  const content = result.content as { text?: string }[] | undefined;
   return {
     isError: Boolean(response.error) || Boolean(result.isError),
-    text: String(result.content?.[0]?.text ?? JSON.stringify(response.error)),
-    structured: result.structuredContent as Record<string, any> | undefined,
+    text: String(content?.[0]?.text ?? JSON.stringify(response.error)),
+    structured: result.structuredContent as Record<string, unknown> | undefined,
   };
+}
+
+/** The structured payload, or a failure naming the tool that did not return one. */
+function structured(call: ToolCall, tool: string): Record<string, unknown> {
+  if (!call.structured) {
+    throw new Error(`${tool} returned no structuredContent: ${call.text}`);
+  }
+  return call.structured;
 }
 
 async function pumpStdout() {
@@ -47,13 +69,14 @@ async function pumpStdout() {
   let buffer = "";
   for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
     buffer += decoder.decode(chunk, { stream: true });
-    let newline: number;
-    while ((newline = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (!line) continue;
-      const message = JSON.parse(line);
-      pending.get(message.id)?.(message);
+    const lines = buffer.split("\n");
+    // The trailing element is whatever arrived after the last newline: an incomplete message,
+    // or "" when the chunk ended cleanly. Either way it waits for the next chunk.
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line) as RpcResponse;
+      if (message.id !== undefined) pending.get(message.id)?.(message);
     }
   }
 }
@@ -89,7 +112,8 @@ afterAll(async () => {
 
 dbTest("the server advertises the intake, the three stages, and the support tools", async () => {
   const { result } = await send("tools/list");
-  expect(result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+  const tools = result?.tools as { name: string }[];
+  expect(tools.map((tool) => tool.name)).toEqual([
     "start_review",
     "resume_match_report",
     "rewrite_experience_xyz",
@@ -108,7 +132,7 @@ dbTest("the three stages chain through one session", async () => {
     company: "Wayne Enterprises",
     role: "Staff Platform Engineer",
   });
-  const session_id = started.structured!.session_id as string;
+  const session_id = structured(started, "start_review").session_id as string;
   expect(session_id).toMatch(/^[a-z0-9]{10}$/);
 
   const blocked = await callTool("rewrite_experience_xyz", { session_id });
@@ -116,7 +140,7 @@ dbTest("the three stages chain through one session", async () => {
   expect(blocked.text).toContain("Call resume_match_report first");
 
   const brief = await callTool("resume_match_report", { session_id });
-  expect(brief.structured!.mode).toBe("brief");
+  expect(structured(brief, "resume_match_report").mode).toBe("brief");
   expect(brief.text).toContain("senior in-house recruiter at Wayne Enterprises");
 
   const thin = await callTool("resume_match_report", {
@@ -147,7 +171,7 @@ dbTest("the three stages chain through one session", async () => {
       red_flags: [flag("No metrics"), flag("Task-shaped bullets"), flag("Seniority gap")],
     },
   });
-  expect(stageOne.structured!.mode).toBe("recorded");
+  expect(structured(stageOne, "resume_match_report").mode).toBe("recorded");
   expect(stageOne.text).toContain("Match score 41/100");
 
   const stageTwoBrief = await callTool("rewrite_experience_xyz", { session_id });
@@ -211,25 +235,25 @@ dbTest("the three stages chain through one session", async () => {
   expect(stageThree.text).toContain("Pipeline complete");
 
   const status = await callTool("session_status", { session_id });
-  expect(status.structured!.stages).toEqual({
+  expect(structured(status, "session_status").stages).toEqual({
     match_report: "complete",
     experience_rewrite: "complete",
     ats_pass: "complete",
   });
 
   const dossier = await callTool("export_dossier", { session_id });
-  const markdown = dossier.structured!.markdown as string;
+  const markdown = structured(dossier, "export_dossier").markdown as string;
   expect(markdown).toContain("**Score: 41/100.**");
   expect(markdown).toContain("Platform: Kubernetes, Go");
   expect(markdown).toContain("p99 latency reduction in ms");
 
   const listed = await callTool("list_sessions", { limit: 20 });
-  expect(listed.structured!.sessions).toContainEqual(
+  expect(structured(listed, "list_sessions").sessions).toContainEqual(
     expect.objectContaining({ session_id, stages_complete: 3 }),
   );
 
   const deleted = await callTool("delete_session", { session_id });
-  expect(deleted.structured!.deleted).toBe(true);
+  expect(structured(deleted, "delete_session").deleted).toBe(true);
   const gone = await callTool("session_status", { session_id });
   expect(gone.isError).toBe(true);
 });

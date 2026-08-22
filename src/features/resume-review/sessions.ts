@@ -4,11 +4,7 @@ import { migrations } from "./migrations";
 
 export type StageName = "match_report" | "experience_rewrite" | "ats_pass";
 
-export const STAGE_ORDER: readonly StageName[] = [
-  "match_report",
-  "experience_rewrite",
-  "ats_pass",
-];
+export const STAGE_ORDER: readonly StageName[] = ["match_report", "experience_rewrite", "ats_pass"];
 
 /** The tool a caller reaches for to move each stage forward, used to write actionable errors. */
 export const STAGE_TOOLS: Record<StageName, string> = {
@@ -193,7 +189,7 @@ export function requireStageResult(
   throw new Error(
     record?.status === "awaiting_result"
       ? `${tool} has issued its instructions for session ${session.id} but no result was ` +
-        `recorded yet. Complete that analysis and call ${tool} again with the result argument.`
+          `recorded yet. Complete that analysis and call ${tool} again with the result argument.`
       : `Stage "${stage}" has not run for session ${session.id}. Call ${tool} first.`,
   );
 }
