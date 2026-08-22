@@ -1,0 +1,47 @@
+services:
+  mcp:
+    build: .
+    image: batcave-mcp
+    restart: unless-stopped
+    # Bound to loopback on purpose. The endpoint speaks plaintext HTTP and authenticates with a
+    # bearer token, which is only safe behind something that terminates TLS — an ALB, or nginx
+    # or Caddy on the same box. Publish it on 0.0.0.0 and the token crosses the internet in
+    # clear text. See README, "Running it on EC2".
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    environment:
+      DB_URL: ${DB_URL:?set DB_URL to your Postgres connection string}
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?set MCP_AUTH_TOKEN; generate one with openssl rand -hex 32}
+    healthcheck:
+      test: ["CMD", "bun", "--eval", "await fetch('http://127.0.0.1:3000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Local Postgres for development and for the end-to-end tests. Not started by default, and
+  # has no business on the EC2 box: `docker compose --profile dev up -d postgres`.
+  postgres:
+    profiles: [dev]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-test}
+      POSTGRES_DB: batcave
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:

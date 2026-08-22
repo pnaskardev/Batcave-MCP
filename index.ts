@@ -1,7 +1,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import { resumeReview } from "./src/features/resume-review";
+import { modules } from "./src/modules";
 import { createServer } from "./src/server";
 
-const server = createServer([resumeReview]);
+const server = createServer(modules);
 
 await server.connect(new StdioServerTransport());

@@ -37,6 +37,26 @@ original. A stage called out of order fails with the tool name you need to call 
 - **No keyword stuffing.** A keyword goes in only where real experience supports it; the rest are
   returned in `keywords_not_addressed` with the reason.
 
+## Transports
+
+Two entrypoints, same tools:
+
+| Entry | Transport | For |
+|---|---|---|
+| `index.ts` | stdio | A client on the same machine — Claude Code, an IDE |
+| `serve.ts` | Streamable HTTP on `/mcp` | A remote client — this is what runs in the container |
+
+stdio is a pipe between two processes on one machine; it cannot be reached over a network. A
+container serving stdio would accept no connections, which is why the EC2 path uses `serve.ts`.
+
+`serve.ts` requires two variables and refuses to start without either:
+
+- `DB_URL` — Postgres connection string
+- `MCP_AUTH_TOKEN` — shared secret; every request needs `Authorization: Bearer <token>`
+
+`GET /healthz` is the only unauthenticated route. It opens no database connection, so a load
+balancer polling it never wakes Postgres.
+
 ## Storage
 
 Everything lives in Postgres. The server writes nothing to local disk — the only local reads are
@@ -62,7 +82,8 @@ Nothing expires. Sessions accumulate until `delete_session` removes them.
 ```bash
 bun install
 export DB_URL='postgres://user:pass@host/db?sslmode=require'   # DATABASE_URL also accepted
-bun start          # stdio MCP server
+bun start          # stdio, for a client on this machine
+bun run serve      # HTTP on :3000, needs MCP_AUTH_TOKEN too
 bun run typecheck
 bun test           # unit tests; no database needed
 ```
@@ -82,6 +103,41 @@ TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
 { "command": "bun", "args": ["index.ts"], "cwd": "/home/jarvis/Work/personal/Batcave" }
 ```
 
+## Running it on EC2
+
+```bash
+export DB_URL='postgres://user:pass@host/db?sslmode=require'
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+docker compose up -d --build
+docker compose logs -f mcp
+```
+
+Compose refuses to start if either variable is unset. Keep them in the shell profile or an
+instance secret — not in a file in this repo.
+
+**The published port is `127.0.0.1:3000`, deliberately.** The endpoint speaks plaintext HTTP and
+authenticates with a bearer token: over the open internet that token is readable by anyone on
+the path. Put TLS in front of it — an ALB terminating HTTPS and forwarding to the instance, or
+nginx/Caddy on the same box proxying to `127.0.0.1:3000`. Then the security group should allow
+443 from your clients and nothing else; port 3000 stays closed to the world.
+
+Rotating the token is `export MCP_AUTH_TOKEN=... && docker compose up -d`, which restarts the
+container. There is one token for everyone — it identifies nobody, so it cannot tell your
+sessions apart from a friend's. Per-user access needs real auth and an owner column on
+`resume_sessions`; neither exists yet.
+
+**`resume_path` resolves inside the container**, so a remote caller cannot use it — paths on
+their laptop mean nothing to the server. Over HTTP, pass `resume_text` and
+`job_description_text`. Mount a volume if you want the path form to work for files on the box.
+
+For local development the compose file also carries a Postgres, off by default:
+
+```bash
+docker compose --profile dev up -d postgres
+TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
+```
+
 ## Layout
 
 The server is a host for **modules**. A module is one self-contained family of tools that owns
@@ -89,9 +145,12 @@ its own tables and its own vocabulary. Resume review is the only one today; a se
 one is a folder under `src/features/` and one entry in the list in `index.ts`.
 
 ```
-index.ts                          createServer([resumeReview]) and connect stdio
+index.ts                          stdio entrypoint
+serve.ts                          HTTP entrypoint (the container runs this)
+src/modules.ts                    the one list of mounted modules, shared by both entries
 src/module.ts                     the ToolModule contract every feature implements
 src/server.ts                     mounts modules onto an McpServer
+src/http.ts                       Streamable HTTP handler, bearer auth, /healthz
 src/platform/                     feature-agnostic; knows nothing about resumes
   db.ts                             lazy Postgres pool + per-module migration runner
   documents.ts                      text / pdf / docx extraction

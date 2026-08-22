@@ -1,0 +1,10 @@
+.git
+.gitignore
+.mcp.json
+node_modules
+tests
+README.md
+CLAUDE.md
+docker-compose.yml
+Dockerfile
+.dockerignore
