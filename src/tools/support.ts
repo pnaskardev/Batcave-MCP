@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { atsPassSchema, experienceRewriteSchema, matchReportSchema } from "../schemas";
 import { sessionIdSchema } from "../schemas";
 import {
+  deleteSession,
   listSessions,
   loadSession,
   STAGE_ORDER,
@@ -190,12 +191,12 @@ export function registerSupport(server: McpServer): void {
       }),
     },
     async ({ limit }) => {
-      const sessions = (await listSessions()).slice(0, limit).map((session) => ({
-        session_id: session.id,
-        company: session.company,
-        role: session.role,
-        updated_at: session.updated_at,
-        stages_complete: STAGE_ORDER.filter((s) => stageStatus(session, s) === "complete").length,
+      const sessions = (await listSessions(limit)).map((summary) => ({
+        session_id: summary.id,
+        company: summary.company,
+        role: summary.role,
+        updated_at: summary.updated_at,
+        stages_complete: summary.stages_complete,
       }));
       const text = sessions.length
         ? sessions
@@ -211,26 +212,39 @@ export function registerSupport(server: McpServer): void {
     {
       title: "Export review dossier",
       description:
-        "Writes everything recorded for a session — match report, XYZ rewrite, ATS pass, and " +
-        "the final resume — to one markdown file.",
-      inputSchema: z.object({
-        session_id: sessionIdSchema,
-        out_path: z
-          .string()
-          .optional()
-          .describe("Output path. Defaults to ./batcave-dossier-<session_id>.md"),
-      }),
-      outputSchema: z.object({ path: z.string(), bytes: z.number() }),
+        "Returns everything recorded for a session — match report, XYZ rewrite, ATS pass, and " +
+        "the final resume — as one markdown document. Returns the text rather than writing a " +
+        "file; save it wherever you want it.",
+      inputSchema: z.object({ session_id: sessionIdSchema }),
+      outputSchema: z.object({ session_id: z.string(), markdown: z.string() }),
     },
-    async ({ session_id, out_path }) => {
+    async ({ session_id }) => {
       const session = await loadSession(session_id);
       const markdown = renderDossier(session);
-      const path = out_path ?? `./batcave-dossier-${session.id}.md`;
-      const bytes = await Bun.write(path, markdown);
       return {
-        content: [{ type: "text" as const, text: `Wrote ${bytes} bytes to ${path}` }],
-        structuredContent: { path, bytes },
+        content: [{ type: "text" as const, text: markdown }],
+        structuredContent: { session_id: session.id, markdown },
       };
+    },
+  );
+
+  server.registerTool(
+    "delete_session",
+    {
+      title: "Delete a review session",
+      description:
+        "Permanently deletes a session and its recorded stages, including the stored resume " +
+        "and job description. Use it once you have exported the dossier — nothing expires on " +
+        "its own, so sessions accumulate until deleted.",
+      inputSchema: z.object({ session_id: sessionIdSchema }),
+      outputSchema: z.object({ session_id: z.string(), deleted: z.boolean() }),
+    },
+    async ({ session_id }) => {
+      const deleted = await deleteSession(session_id);
+      const text = deleted
+        ? `Deleted session ${session_id} and everything stored against it.`
+        : `No session ${session_id} to delete.`;
+      return { content: [{ type: "text" as const, text }], structuredContent: { session_id, deleted } };
     },
   );
 }

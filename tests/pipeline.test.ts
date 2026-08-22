@@ -1,23 +1,15 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadDocument } from "../src/documents";
 import { atsPassInstructions, experienceRewriteInstructions } from "../src/stages";
-import {
-  createSession,
-  loadSession,
-  markComplete,
-  requireStageResult,
-  saveSession,
-  type DocumentRecord,
-} from "../src/store";
+import { requireStageResult, type DocumentRecord, type Session } from "../src/store";
 
 let dir: string;
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "batcave-test-"));
-  process.env.BATCAVE_DATA_DIR = dir;
 });
 
 afterAll(async () => {
@@ -35,13 +27,17 @@ const doc = (text: string): DocumentRecord => ({
 const RESUME = "EXPERIENCE\nAcme Corp, Backend Engineer, 2021-2024\n".padEnd(200, "-");
 const JD = "Staff Platform Engineer. Kubernetes, Go, Terraform.\n".padEnd(200, "-");
 
-function freshSession() {
-  return createSession({
+function session(stages: Session["stages"] = {}): Session {
+  return {
+    id: "abc1234567",
+    created_at: "2026-08-22T00:00:00.000Z",
+    updated_at: "2026-08-22T00:00:00.000Z",
     company: "Wayne Enterprises",
     role: "Staff Platform Engineer",
     resume: doc(RESUME),
-    jobDescription: doc(JD),
-  });
+    job_description: doc(JD),
+    stages,
+  };
 }
 
 test("loadDocument requires exactly one of text or path", async () => {
@@ -59,57 +55,43 @@ test("loadDocument names the supported formats for an unreadable type", async ()
   await expect(loadDocument("resume", { path })).rejects.toThrow(".pdf, .docx, .txt, .md");
 });
 
-test("session ids that would escape the data directory are rejected", async () => {
-  await expect(loadSession("../../etc/passwd")).rejects.toThrow("Invalid session_id");
-});
-
-test("a session round-trips through disk", async () => {
-  const session = await saveSession(freshSession());
-  const loaded = await loadSession(session.id);
-  expect(loaded.resume.text).toBe(RESUME);
-  expect(loaded.company).toBe("Wayne Enterprises");
-});
-
-test("session files are readable only by their owner", async () => {
-  const session = await saveSession(freshSession());
-  const info = await stat(join(dir, `${session.id}.json`));
-  expect(info.mode & 0o777).toBe(0o600);
-});
-
 test("a later stage refuses to run before its prerequisite is recorded", () => {
-  const session = freshSession();
-  expect(() => requireStageResult(session, "match_report")).toThrow(
-    "has not run for session",
-  );
+  expect(() => requireStageResult(session(), "match_report")).toThrow("has not run for session");
 });
 
 test("an issued-but-unanswered stage says how to finish it", () => {
-  const session = freshSession();
-  session.stages.match_report = { status: "awaiting_result", issued_at: "now" };
-  expect(() => requireStageResult(session, "match_report")).toThrow("no result was recorded yet");
+  const issued = session({ match_report: { status: "awaiting_result", issued_at: "now" } });
+  expect(() => requireStageResult(issued, "match_report")).toThrow("no result was recorded yet");
 });
 
 test("stage 2 briefs the model with the recorded stage 1 report", () => {
-  const session = freshSession();
-  markComplete(session, "match_report", { match_score: 41, missing_keywords: ["Kubernetes"] });
-  const brief = experienceRewriteInstructions(
-    session,
-    requireStageResult(session, "match_report"),
-  );
+  const done = session({
+    match_report: {
+      status: "complete",
+      issued_at: "now",
+      result: { match_score: 41, missing_keywords: ["Kubernetes"] },
+    },
+  });
+  const brief = experienceRewriteInstructions(done, requireStageResult(done, "match_report"));
   expect(brief).toContain("Kubernetes");
   expect(brief).toContain("[QUANTIFY:");
-  expect(brief).toContain(session.id);
+  expect(brief).toContain(done.id);
 });
 
 test("stage 3 scans the stage 2 resume, not the original", () => {
-  const session = freshSession();
-  markComplete(session, "match_report", { match_score: 41 });
-  markComplete(session, "experience_rewrite", { updated_resume: "REWRITTEN RESUME BODY" });
-  const rewrite = requireStageResult(session, "experience_rewrite");
+  const done = session({
+    match_report: { status: "complete", issued_at: "now", result: { match_score: 41 } },
+    experience_rewrite: {
+      status: "complete",
+      issued_at: "now",
+      result: { updated_resume: "REWRITTEN RESUME BODY" },
+    },
+  });
+  const rewrite = requireStageResult(done, "experience_rewrite");
   const brief = atsPassInstructions(
-    session,
+    done,
     rewrite.updated_resume as string,
-    requireStageResult(session, "match_report"),
+    requireStageResult(done, "match_report"),
   );
   expect(brief).toContain("REWRITTEN RESUME BODY");
   expect(brief).not.toContain("Acme Corp, Backend Engineer");

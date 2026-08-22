@@ -19,7 +19,6 @@ import {
   markComplete,
   markIssued,
   requireStageResult,
-  saveSession,
   type Session,
   type StageName,
 } from "../store";
@@ -50,8 +49,7 @@ async function runStage(args: {
   const session = await loadSession(args.session_id);
 
   if (args.result) {
-    markComplete(session, args.stage, args.result);
-    await saveSession(session);
+    await markComplete(session.id, args.stage, args.result);
     const next = args.onRecorded(session, args.result);
     const envelope: Envelope = {
       session_id: session.id,
@@ -63,8 +61,7 @@ async function runStage(args: {
   }
 
   const instructions = args.instructions(session);
-  markIssued(session, args.stage);
-  await saveSession(session);
+  await markIssued(session.id, args.stage);
   const envelope: Envelope = {
     session_id: session.id,
     stage: args.stage,
@@ -113,14 +110,12 @@ export function registerPipeline(server: McpServer): void {
           path: args.job_description_path,
         }),
       ]);
-      const session = await saveSession(
-        createSession({
-          company: args.company?.trim() || "the hiring company",
-          role: args.role?.trim() || "the advertised role",
-          resume,
-          jobDescription,
-        }),
-      );
+      const session = await createSession({
+        company: args.company?.trim() || "the hiring company",
+        role: args.role?.trim() || "the advertised role",
+        resume,
+        jobDescription,
+      });
       const output = {
         session_id: session.id,
         company: session.company,

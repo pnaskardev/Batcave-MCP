@@ -19,6 +19,7 @@
   "scripts": {
     "start": "bun index.ts",
     "test": "bun test",
+    "test:e2e": "TEST_DB_URL=${TEST_DB_URL:?point at a THROWAWAY database, the suite drops its tables} bun test",
     "typecheck": "bunx tsc --noEmit"
   }
 }

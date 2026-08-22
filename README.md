@@ -14,7 +14,8 @@ match report, and you cannot run the ATS pass before you have a rewrite.
 | `ats_scroll_stopper_pass` | **Stage 3.** ATS parser pass plus a hiring manager on resume #147 of 200: which sections get skipped, then rewrites them to stop the scroll. Returns the final resume. |
 | `session_status` | Which stages are done, awaiting a result, or not started, and what to call next. |
 | `list_sessions` | Stored sessions, most recently updated first. |
-| `export_dossier` | Writes the whole review — all three stages plus the final resume — to one markdown file. |
+| `export_dossier` | Returns the whole review — all three stages plus the final resume — as one markdown document. |
+| `delete_session` | Deletes a session and everything stored against it. Nothing expires on its own. |
 
 ## How a stage runs
 
@@ -36,13 +37,40 @@ original. A stage called out of order fails with the tool name you need to call 
 - **No keyword stuffing.** A keyword goes in only where real experience supports it; the rest are
   returned in `keywords_not_addressed` with the reason.
 
+## Storage
+
+Everything lives in Postgres. The server writes nothing to local disk — the only local reads are
+the resume and job-description files you point it at.
+
+```
+sessions(id, created_at, updated_at, company, role, resume jsonb, job_description jsonb)
+stages(session_id -> sessions.id on delete cascade, stage, status,
+       issued_at, completed_at, result jsonb, primary key (session_id, stage))
+```
+
+Two tables rather than one document, so recording a stage writes one row instead of rewriting
+both resumes, and `list_sessions` never selects the document text at all. Schema is created on
+first use with `IF NOT EXISTS`, lazily — starting the server does not wake the database.
+
+Nothing expires. Sessions accumulate until `delete_session` removes them.
+
 ## Running it
 
 ```bash
 bun install
+export DB_URL='postgres://user:pass@host/db?sslmode=require'   # DATABASE_URL also accepted
 bun start          # stdio MCP server
-bun test
 bun run typecheck
+bun test           # unit tests; no database needed
+```
+
+The end-to-end tests speak the real wire protocol against a real Postgres, and **drop their
+tables on teardown**. They read `TEST_DB_URL`, deliberately not `DB_URL`, so pointing the server
+at a real database cannot arm the teardown:
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=batcave -p 55432:5432 postgres:16-alpine
+TEST_DB_URL='postgres://postgres:test@localhost:55432/batcave' bun test
 ```
 
 `.mcp.json` in this directory registers the server for Claude Code. For another client:
@@ -51,16 +79,14 @@ bun run typecheck
 { "command": "bun", "args": ["index.ts"], "cwd": "/home/jarvis/Work/personal/Batcave" }
 ```
 
-Sessions are JSON files in `~/.batcave/sessions/`, overridable with `BATCAVE_DATA_DIR`.
-
 ## Layout
 
 ```
 index.ts              server bootstrap, stdio transport
-src/store.ts          session persistence and stage gating
+src/store.ts          Postgres-backed sessions and stage gating
 src/documents.ts      text / pdf / docx extraction
 src/schemas.ts        zod schemas for each stage's result
 src/stages.ts         the three briefs
 src/tools/pipeline.ts start_review and the three chained stage tools
-src/tools/support.ts  status, listing, dossier export
+src/tools/support.ts  status, listing, dossier export, deletion
 ```

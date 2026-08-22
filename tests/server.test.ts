@@ -1,8 +1,16 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { SQL } from "bun";
 import type { Subprocess } from "bun";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// These exercise the real wire protocol against a real Postgres. TEST_DB_URL must point at a
+// THROWAWAY database — the suite drops its tables on the way out. It is deliberately not
+// DB_URL, so pointing the server at production cannot arm the teardown.
+const DATABASE_URL = process.env.TEST_DB_URL;
+const dbTest = DATABASE_URL ? test : test.skip;
+if (!DATABASE_URL) {
+  console.warn("TEST_DB_URL is not set — skipping the end-to-end server tests.");
+}
 
 const RESUME =
   "Priya Sharma\nSenior Backend Engineer\n\nEXPERIENCE\nAcme Corp, Backend Engineer, 2021-2024\n" +
@@ -11,7 +19,6 @@ const JD =
   "Staff Platform Engineer at Wayne Enterprises. Own our Kubernetes platform, drive Go " +
   "services, run Terraform on AWS, and improve observability with Prometheus. SLO ownership.";
 
-let dir: string;
 let proc: Subprocess<"pipe", "pipe", "inherit">;
 let nextId = 1;
 const pending = new Map<number, (value: Record<string, any>) => void>();
@@ -52,12 +59,12 @@ async function pumpStdout() {
 }
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "batcave-e2e-"));
+  if (!DATABASE_URL) return;
   proc = Bun.spawn(["bun", join(import.meta.dir, "..", "index.ts")], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
-    env: { ...process.env, BATCAVE_DATA_DIR: dir },
+    env: { ...process.env, DB_URL: DATABASE_URL },
   });
   void pumpStdout();
   await send("initialize", {
@@ -70,11 +77,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (!DATABASE_URL) return;
   proc.kill();
-  await rm(dir, { recursive: true, force: true });
+  const sql = new SQL(DATABASE_URL);
+  await sql.unsafe("drop table if exists stages; drop table if exists sessions;");
+  await sql.close();
 });
 
-test("the server advertises the intake, the three stages, and the support tools", async () => {
+dbTest("the server advertises the intake, the three stages, and the support tools", async () => {
   const { result } = await send("tools/list");
   expect(result.tools.map((tool: { name: string }) => tool.name)).toEqual([
     "start_review",
@@ -84,10 +94,11 @@ test("the server advertises the intake, the three stages, and the support tools"
     "session_status",
     "list_sessions",
     "export_dossier",
+    "delete_session",
   ]);
 });
 
-test("the three stages chain through one session", async () => {
+dbTest("the three stages chain through one session", async () => {
   const started = await callTool("start_review", {
     resume_text: RESUME,
     job_description_text: JD,
@@ -203,17 +214,24 @@ test("the three stages chain through one session", async () => {
     ats_pass: "complete",
   });
 
-  const dossier = await callTool("export_dossier", {
-    session_id,
-    out_path: join(dir, "dossier.md"),
-  });
-  const markdown = await Bun.file(dossier.structured!.path as string).text();
+  const dossier = await callTool("export_dossier", { session_id });
+  const markdown = dossier.structured!.markdown as string;
   expect(markdown).toContain("**Score: 41/100.**");
   expect(markdown).toContain("Platform: Kubernetes, Go");
   expect(markdown).toContain("p99 latency reduction in ms");
+
+  const listed = await callTool("list_sessions", { limit: 20 });
+  expect(listed.structured!.sessions).toContainEqual(
+    expect.objectContaining({ session_id, stages_complete: 3 }),
+  );
+
+  const deleted = await callTool("delete_session", { session_id });
+  expect(deleted.structured!.deleted).toBe(true);
+  const gone = await callTool("session_status", { session_id });
+  expect(gone.isError).toBe(true);
 });
 
-test("an unknown session explains how to recover", async () => {
+dbTest("an unknown session explains how to recover", async () => {
   const missing = await callTool("session_status", { session_id: "deadbeef99" });
   expect(missing.isError).toBe(true);
   expect(missing.text).toContain("Run list_sessions");
