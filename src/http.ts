@@ -21,11 +21,15 @@ function bearer(request: Request): string | undefined {
 }
 
 function unauthorized(): Response {
-  // Deliberately no `WWW-Authenticate` header. RFC 7235 asks for one on a 401, but MCP clients
-  // read `WWW-Authenticate: Bearer` as the start of an OAuth handshake — Claude's connector
-  // dialog reports "Authentication: Always required (Detected)" and then fails looking for
-  // authorization-server metadata this server does not publish. It authenticates with a fixed
-  // token supplied as a request header, so staying silent here is what describes it honestly.
+  // Deliberately no `WWW-Authenticate` header, despite RFC 7235 asking for one on a 401. In MCP
+  // that header is the OAuth discovery signal — clients follow it looking for authorization
+  // server metadata, which this server does not publish because it has no OAuth. A bare
+  // challenge would point them at a handshake that cannot complete.
+  //
+  // It does NOT affect how Claude's connector dialog labels the server. That label is inferred
+  // from the 401 status alone: tested by deploying both variants, the dialog reports
+  // "Authentication: Always required (Detected)" either way. Select "None" and supply the token
+  // as a request header.
   return new Response(JSON.stringify({ error: "unauthorized" }), {
     status: 401,
     headers: { "content-type": "application/json" },
