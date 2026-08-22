@@ -84,6 +84,37 @@ Never edit a migration that has already shipped; add a new one.
 **Read what drizzle-kit generates.** It diffs schema snapshots, so a column rename is
 indistinguishable from a drop plus an add — and it will happily emit the destructive version.
 
+### If someone else's migration merges before yours
+
+Regenerate yours on top of theirs. This is not optional, and getting it wrong fails silently.
+
+```
+git rebase main                              # or merge
+delete your drizzle/NNNN_*.sql and its entry in drizzle/meta/_journal.json
+bun run db:generate                          # rebuild the diff against the merged schema
+```
+
+The migrator decides what to apply by comparing timestamps against the newest migration already
+in the database:
+
+```js
+if (!lastDbMigration || Number(lastDbMigration.created_at) < migration.folderMillis)
+```
+
+So a migration whose journal timestamp is **older** than one already applied is skipped — with no
+error, on every deploy, forever. Two people branching from the same commit produce exactly that:
+whoever generated earlier but merges later has their migration silently dropped, and the deploy
+reports success. Regenerating gives yours a current timestamp and a diff against the real schema.
+
+The same rule explains a confusing local case: dropping your tables but leaving the `drizzle`
+schema means the journal still claims everything is applied, so `db:migrate` does nothing. Reset
+both together:
+
+```
+bun -e 'import {sql} from "./src/platform/db"; await sql().unsafe("drop table if exists resume_stages; drop table if exists resume_sessions; drop schema if exists drizzle cascade;")'
+bun run db:migrate
+```
+
 ## Style
 
 Biome decides formatting, so there is nothing to argue about in review. Beyond that, matching the
