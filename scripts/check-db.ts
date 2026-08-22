@@ -37,7 +37,7 @@ try {
   console.log(
     info.tables.length
       ? `  tables    ${info.tables.join(", ")}`
-      : "  tables    none yet — migrations run on the first tool call",
+      : "  tables    none — run `bun run db:migrate`",
   );
   process.exit(0);
 } catch (error) {
