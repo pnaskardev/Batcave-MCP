@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { SQL } from "bun";
+import { migrateToLatest } from "../src/platform/db";
 
 // These exercise the real wire protocol against a real Postgres. TEST_DB_URL must point at a
 // THROWAWAY database — the suite drops its tables on the way out. It is deliberately not
@@ -83,6 +84,8 @@ async function pumpStdout() {
 
 beforeAll(async () => {
   if (!DATABASE_URL) return;
+  // No lazy migration any more — the suite owns its schema the way a deploy does.
+  await migrateToLatest();
   proc = Bun.spawn(["bun", join(import.meta.dir, "..", "index.ts")], {
     stdin: "pipe",
     stdout: "pipe",
@@ -105,7 +108,7 @@ afterAll(async () => {
   const sql = new SQL(DATABASE_URL);
   await sql.unsafe(
     "drop table if exists resume_stages; drop table if exists resume_sessions; " +
-      "drop table if exists schema_migrations;",
+      "drop schema if exists drizzle cascade;",
   );
   await sql.close();
 });

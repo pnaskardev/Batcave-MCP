@@ -1,7 +1,9 @@
 import { SQL } from "bun";
-import type { Migration } from "../module";
+import { type BunSQLDatabase, drizzle } from "drizzle-orm/bun-sql";
+import { migrate } from "drizzle-orm/bun-sql/migrator";
 
 let client: SQL | undefined;
+let database: BunSQLDatabase | undefined;
 
 function connectionUrl(): string {
   const url = process.env.DB_URL ?? process.env.DATABASE_URL;
@@ -23,10 +25,28 @@ export function assertConfigured(): void {
   connectionUrl();
 }
 
-/** The shared connection pool. Created on first use so starting the server wakes nothing. */
+/** The raw Bun SQL client, for introspection that has no schema to go through. */
 export function sql(): SQL {
   client ??= new SQL(connectionUrl());
   return client;
+}
+
+/** The query builder every repository uses. Created on first use, so startup wakes nothing. */
+export function db(): BunSQLDatabase {
+  database ??= drizzle({ client: sql() });
+  return database;
+}
+
+/** Where drizzle-kit writes migrations, relative to the working directory. */
+const MIGRATIONS_FOLDER = "./drizzle";
+
+/**
+ * Applies every pending migration. Safe to run repeatedly — drizzle records what it has applied
+ * and skips it. Run it as a deploy step (`bun run db:migrate`) rather than at startup: a broken
+ * migration should fail the deploy, not a user's request.
+ */
+export async function migrateToLatest(): Promise<void> {
+  await migrate(db(), { migrationsFolder: MIGRATIONS_FOLDER });
 }
 
 export interface DatabaseInfo {
@@ -40,11 +60,11 @@ export interface DatabaseInfo {
 /** Opens a real connection and reports what answered. Used by `bun run db:check`. */
 export async function inspect(): Promise<DatabaseInfo> {
   const started = performance.now();
-  const db = sql();
-  const [identity] = await db`
+  const raw = sql();
+  const [identity] = await raw`
     select current_database() as database, current_user as "user", version() as version`;
   const latencyMs = Math.round(performance.now() - started);
-  const tables = await db`
+  const tables = await raw`
     select tablename from pg_tables where schemaname = 'public' order by tablename`;
   return {
     database: String(identity.database),
@@ -53,45 +73,4 @@ export async function inspect(): Promise<DatabaseInfo> {
     latencyMs,
     tables: tables.map((row: { tablename: string }) => row.tablename),
   };
-}
-
-const LEDGER = `create table if not exists schema_migrations (
-  module text not null,
-  id text not null,
-  applied_at timestamptz not null default now(),
-  primary key (module, id)
-)`;
-
-/**
- * Returns a memoised `ensure()` that brings one module's schema up to date. Modules call it
- * before their first query rather than at startup, so an unused module costs no round trips.
- */
-export function schemaFor(module: string, migrations: readonly Migration[]): () => Promise<void> {
-  let ready: Promise<void> | undefined;
-  return () => (ready ??= migrate(module, migrations).then(() => undefined));
-}
-
-/**
- * Brings one module's schema up to date and reports the ids it applied. Safe to run repeatedly:
- * each migration executes with its ledger row in one transaction, so a migration is applied
- * exactly once even if a previous run died halfway through.
- *
- * Prefer running this as a deploy step (`bun run db:migrate`) over letting the first tool call
- * trigger it — a failed migration should break the deploy, not a user's request.
- */
-export async function migrate(module: string, migrations: readonly Migration[]): Promise<string[]> {
-  const db = sql();
-  await db.unsafe(LEDGER);
-  const applied = await db`select id from schema_migrations where module = ${module}`;
-  const done = new Set(applied.map((row: { id: string }) => row.id));
-  const newlyApplied: string[] = [];
-  for (const migration of migrations) {
-    if (done.has(migration.id)) continue;
-    await db.begin(async (tx) => {
-      await tx.unsafe(migration.sql);
-      await tx`insert into schema_migrations (module, id) values (${module}, ${migration.id})`;
-    });
-    newlyApplied.push(migration.id);
-  }
-  return newlyApplied;
 }

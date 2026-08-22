@@ -5,7 +5,7 @@ import { createServer } from "../src/server";
 
 /** A module the server has never heard of, standing in for whatever gets built next. */
 function stubModule(name: string, onRegister: (server: McpServer) => void = () => {}): ToolModule {
-  return { name, migrations: [], register: onRegister };
+  return { name, register: onRegister };
 }
 
 test("mounts unrelated modules in the order they are listed", () => {
@@ -17,7 +17,7 @@ test("mounts unrelated modules in the order they are listed", () => {
   expect(mounted).toEqual(["first", "second"]);
 });
 
-test("a module needs nothing but a name, migrations, and register", () => {
+test("a module needs nothing but a name and a register function", () => {
   expect(() => createServer([stubModule("standalone")])).not.toThrow();
 });
 

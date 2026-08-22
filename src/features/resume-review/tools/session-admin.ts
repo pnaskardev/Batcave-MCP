@@ -6,10 +6,9 @@ import {
   listSessions,
   loadSession,
   type ReviewSession,
-  STAGE_ORDER,
-  STAGE_TOOLS,
   stageStatus,
 } from "../sessions";
+import { STAGE_ORDER, STAGE_TOOLS, type StageName } from "../stage";
 
 const sessionIdSchema = z.string().describe("Session id returned by start_review.");
 
@@ -46,10 +45,12 @@ function registerStatusTool(server: McpServer): void {
     async ({ session_id }) => {
       const session = await loadSession(session_id);
       const stages = Object.fromEntries(
-        STAGE_ORDER.map((stage) => [stage, stageStatus(session, stage)]),
+        STAGE_ORDER.map((stage: StageName) => [stage, stageStatus(session, stage)]),
       );
       const next_step = nextStep(session);
-      const lines = STAGE_ORDER.map((stage) => `- ${stage}: ${stages[stage]}`).join("\n");
+      const lines = STAGE_ORDER.map((stage: StageName) => `- ${stage}: ${stages[stage]}`).join(
+        "\n",
+      );
       return toolResult(
         `Session ${session.id} — ${session.role} @ ${session.company}\n${lines}\n\n${next_step}`,
         {

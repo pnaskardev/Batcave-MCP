@@ -1,20 +1,11 @@
-import { schemaFor, sql } from "../../platform/db";
+import { desc, eq, sql } from "drizzle-orm";
+import { db } from "../../platform/db";
 import type { StoredDocument } from "../../platform/stored-document";
-import { migrations } from "./migrations";
-
-export type StageName = "match_report" | "experience_rewrite" | "ats_pass";
-
-export const STAGE_ORDER: readonly StageName[] = ["match_report", "experience_rewrite", "ats_pass"];
-
-/** The tool a caller reaches for to move each stage forward, used to write actionable errors. */
-export const STAGE_TOOLS: Record<StageName, string> = {
-  match_report: "resume_match_report",
-  experience_rewrite: "rewrite_experience_xyz",
-  ats_pass: "ats_scroll_stopper_pass",
-};
+import { resumeSessions, resumeStages } from "./schema";
+import { STAGE_TOOLS, type StageName, type StageStatus } from "./stage";
 
 export interface StageRecord {
-  status: "awaiting_result" | "complete";
+  status: StageStatus;
   issued_at: string;
   completed_at?: string;
   result?: Record<string, unknown>;
@@ -41,8 +32,6 @@ export interface SessionSummary {
 
 const ID_PATTERN = /^[a-z0-9]{4,32}$/;
 
-const ready = schemaFor("resume-review", migrations);
-
 /** Rejects a malformed id before it costs a round trip to the database. */
 function assertId(id: string): string {
   if (!ID_PATTERN.test(id)) {
@@ -55,100 +44,112 @@ function newId(): string {
   return crypto.randomUUID().replaceAll("-", "").slice(0, 10);
 }
 
-function iso(value: string | Date): string {
-  return new Date(value).toISOString();
-}
-
 export async function createSession(input: {
   company: string;
   role: string;
   resume: StoredDocument;
   jobDescription: StoredDocument;
 }): Promise<ReviewSession> {
-  await ready();
-  const id = newId();
-  const [row] = await sql()`
-    insert into resume_sessions (id, company, role, resume, job_description)
-    values (${id}, ${input.company}, ${input.role}, ${input.resume}, ${input.jobDescription})
-    returning created_at, updated_at`;
+  const [row] = await db()
+    .insert(resumeSessions)
+    .values({
+      id: newId(),
+      company: input.company,
+      role: input.role,
+      resume: input.resume,
+      jobDescription: input.jobDescription,
+    })
+    .returning();
+  if (!row) throw new Error("The database accepted the session but returned no row.");
   return {
-    id,
-    created_at: iso(row.created_at),
-    updated_at: iso(row.updated_at),
-    company: input.company,
-    role: input.role,
-    resume: input.resume,
-    job_description: input.jobDescription,
+    id: row.id,
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+    company: row.company,
+    role: row.role,
+    resume: row.resume,
+    job_description: row.jobDescription,
     stages: {},
   };
 }
 
 export async function loadSession(id: string): Promise<ReviewSession> {
-  await ready();
   assertId(id);
-  const db = sql();
-  const [[session], stageRows] = await Promise.all([
-    db`select * from resume_sessions where id = ${id}`,
-    db`select stage, status, issued_at, completed_at, result
-       from resume_stages where session_id = ${id}`,
+  const [sessionRows, stageRows] = await Promise.all([
+    db().select().from(resumeSessions).where(eq(resumeSessions.id, id)),
+    db().select().from(resumeStages).where(eq(resumeStages.sessionId, id)),
   ]);
+
+  const session = sessionRows[0];
   if (!session) {
     throw new Error(
       `No session "${id}". Run list_sessions to see open sessions, or open a new one with ` +
         `start_review (resume + job description).`,
     );
   }
+
   const stages: Partial<Record<StageName, StageRecord>> = {};
   for (const row of stageRows) {
-    stages[row.stage as StageName] = {
+    stages[row.stage] = {
       status: row.status,
-      issued_at: iso(row.issued_at),
-      ...(row.completed_at ? { completed_at: iso(row.completed_at) } : {}),
+      issued_at: row.issuedAt.toISOString(),
+      ...(row.completedAt ? { completed_at: row.completedAt.toISOString() } : {}),
       ...(row.result ? { result: row.result } : {}),
     };
   }
+
   return {
     id: session.id,
-    created_at: iso(session.created_at),
-    updated_at: iso(session.updated_at),
+    created_at: session.createdAt.toISOString(),
+    updated_at: session.updatedAt.toISOString(),
     company: session.company,
     role: session.role,
     resume: session.resume,
-    job_description: session.job_description,
+    job_description: session.jobDescription,
     stages,
   };
 }
 
 /** Deliberately does not select the documents — a listing has no use for two full resumes. */
 export async function listSessions(limit: number): Promise<SessionSummary[]> {
-  await ready();
-  const rows = await sql()`
-    select s.id, s.company, s.role, s.updated_at,
-           count(st.stage) filter (where st.status = 'complete') as stages_complete
-    from resume_sessions s
-    left join resume_stages st on st.session_id = s.id
-    group by s.id
-    order by s.updated_at desc
-    limit ${limit}`;
-  return rows.map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    company: String(row.company),
-    role: String(row.role),
-    updated_at: iso(row.updated_at as string),
-    stages_complete: Number(row.stages_complete),
+  const rows = await db()
+    .select({
+      id: resumeSessions.id,
+      company: resumeSessions.company,
+      role: resumeSessions.role,
+      updatedAt: resumeSessions.updatedAt,
+      stagesComplete: sql<number>`
+        count(${resumeStages.stage}) filter (where ${resumeStages.status} = 'complete')
+      `.mapWith(Number),
+    })
+    .from(resumeSessions)
+    .leftJoin(resumeStages, eq(resumeStages.sessionId, resumeSessions.id))
+    .groupBy(resumeSessions.id)
+    .orderBy(desc(resumeSessions.updatedAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    company: row.company,
+    role: row.role,
+    updated_at: row.updatedAt.toISOString(),
+    stages_complete: row.stagesComplete,
   }));
 }
 
 async function touch(id: string): Promise<void> {
-  await sql()`update resume_sessions set updated_at = now() where id = ${id}`;
+  await db().update(resumeSessions).set({ updatedAt: new Date() }).where(eq(resumeSessions.id, id));
 }
 
 export async function markIssued(id: string, stage: StageName): Promise<void> {
-  await sql()`
-    insert into resume_stages (session_id, stage, status, issued_at)
-    values (${id}, ${stage}, 'awaiting_result', now())
-    on conflict (session_id, stage) do update
-      set status = 'awaiting_result', issued_at = now(), completed_at = null, result = null`;
+  const issuedAt = new Date();
+  await db()
+    .insert(resumeStages)
+    .values({ sessionId: id, stage, status: "awaiting_result", issuedAt })
+    .onConflictDoUpdate({
+      target: [resumeStages.sessionId, resumeStages.stage],
+      set: { status: "awaiting_result", issuedAt, completedAt: null, result: null },
+    });
   await touch(id);
 }
 
@@ -157,19 +158,24 @@ export async function markComplete(
   stage: StageName,
   result: Record<string, unknown>,
 ): Promise<void> {
-  await sql()`
-    insert into resume_stages (session_id, stage, status, issued_at, completed_at, result)
-    values (${id}, ${stage}, 'complete', now(), now(), ${result})
-    on conflict (session_id, stage) do update
-      set status = 'complete', completed_at = now(), result = excluded.result`;
+  const now = new Date();
+  await db()
+    .insert(resumeStages)
+    .values({ sessionId: id, stage, status: "complete", issuedAt: now, completedAt: now, result })
+    .onConflictDoUpdate({
+      target: [resumeStages.sessionId, resumeStages.stage],
+      set: { status: "complete", completedAt: now, result },
+    });
   await touch(id);
 }
 
 export async function deleteSession(id: string): Promise<boolean> {
-  await ready();
   assertId(id);
-  const rows = await sql()`delete from resume_sessions where id = ${id} returning id`;
-  return rows.length > 0;
+  const deleted = await db()
+    .delete(resumeSessions)
+    .where(eq(resumeSessions.id, id))
+    .returning({ id: resumeSessions.id });
+  return deleted.length > 0;
 }
 
 export function stageStatus(session: ReviewSession, stage: StageName): string {

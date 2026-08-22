@@ -2,13 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { type ToolResult, toolResult } from "../../platform/tool-result";
 import { type StageEnvelope, stageEnvelopeSchema } from "./schemas";
-import {
-  loadSession,
-  markComplete,
-  markIssued,
-  type ReviewSession,
-  type StageName,
-} from "./sessions";
+import { loadSession, markComplete, markIssued, type ReviewSession } from "./sessions";
+import type { StageName } from "./stage";
 
 /**
  * Each stage of the review is one tool called twice.

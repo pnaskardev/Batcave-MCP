@@ -74,9 +74,15 @@ Two boundaries to respect:
 - No module imports another module. Two modules that need to know about each other are one
   module.
 
-Schema changes are append-only migrations in the module's `migrations.ts`. Never edit a migration
-that has already shipped — its id is recorded in `schema_migrations` and it will not run again.
-Add a new one, then apply it with `bun run db:migrate`.
+Schema lives in the module's `schema.ts` as Drizzle table definitions — that file is the single
+source of truth. To change it: edit `schema.ts`, run `bun run db:generate` to write the migration
+into `drizzle/`, read the SQL it produced, then `bun run db:migrate` to apply it. Commit the
+schema change and the generated migration together.
+
+Never edit a migration that has already shipped; add a new one.
+
+**Read what drizzle-kit generates.** It diffs schema snapshots, so a column rename is
+indistinguishable from a drop plus an add — and it will happily emit the destructive version.
 
 ## Style
 

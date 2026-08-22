@@ -33,7 +33,8 @@ services:
     build:
       context: .
       target: dev
-    command: ["bun", "--hot", "serve.ts"]
+    # Migrations no longer run lazily on the first tool call, so apply them before serving.
+    command: ["sh", "-c", "bun scripts/migrate.ts && bun --hot serve.ts"]
     # Waits for Postgres to accept connections, so a fresh `up` never races the first migration.
     depends_on:
       postgres:
@@ -52,6 +53,8 @@ services:
       - ./src:/app/src:ro
       - ./serve.ts:/app/serve.ts:ro
       - ./index.ts:/app/index.ts:ro
+      - ./drizzle:/app/drizzle:ro
+      - ./scripts:/app/scripts:ro
 
 volumes:
   postgres-data:

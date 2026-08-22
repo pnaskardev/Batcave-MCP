@@ -67,7 +67,7 @@ resume_sessions(id, created_at, updated_at, company, role,
                 resume jsonb, job_description jsonb)
 resume_stages(session_id -> resume_sessions.id on delete cascade, stage, status,
               issued_at, completed_at, result jsonb, primary key (session_id, stage))
-schema_migrations(module, id, applied_at)     -- shared, owned by src/platform/db.ts
+drizzle.__drizzle_migrations                  -- drizzle's journal, one for the project
 ```
 
 Two tables rather than one document, so recording a stage writes one row instead of rewriting
@@ -75,9 +75,14 @@ both resumes, and `list_sessions` never selects the document text at all. Tables
 module, and migrations run lazily on that module's first query — starting the server does not
 wake the database.
 
-Migrations are append-only and recorded in `schema_migrations`, so each runs exactly once per
-database. `bun run db:migrate` applies what is pending; the server also does it lazily on a
-module's first query as a fallback.
+Tables are defined once, in each module's `schema.ts`, using Drizzle. `bun run db:generate` diffs
+those definitions against `drizzle/` and writes the migration; `bun run db:migrate` applies what
+is pending. **Nothing migrates at runtime** — a broken migration fails the deploy rather than a
+user's request.
+
+Read every generated migration before committing it. drizzle-kit diffs schema snapshots, and a
+column rename looks identical to a drop plus an add unless you tell it otherwise — which silently
+destroys the column's data.
 
 Nothing expires. Sessions accumulate until `delete_session` removes them.
 
@@ -104,7 +109,8 @@ Two database commands, neither of which needs the server running:
 
 ```bash
 bun run db:check      # can this machine reach DB_URL, and what is in it?
-bun run db:migrate    # create or update the tables; safe to run repeatedly
+bun run db:generate   # schema.ts changed -> write a migration into drizzle/
+bun run db:migrate    # apply pending migrations; safe to run repeatedly
 ```
 
 `db:check` is the only thing that opens a connection without serving. Both entrypoints validate
@@ -179,17 +185,19 @@ one is a folder under `src/features/` and one entry in the list in `index.ts`.
 index.ts                          stdio entrypoint
 serve.ts                          HTTP entrypoint (the container runs this)
 src/modules.ts                    the one list of mounted modules, shared by both entries
+drizzle/                          generated migrations, one journal for all modules
+drizzle.config.ts                 points drizzle-kit at src/features/*/schema.ts
 src/module.ts                     the ToolModule contract every feature implements
 src/server.ts                     mounts modules onto an McpServer
 src/http.ts                       Streamable HTTP handler, bearer auth, /healthz
 src/platform/                     feature-agnostic; knows nothing about resumes
-  db.ts                             lazy Postgres pool + per-module migration runner
+  db.ts                             lazy Drizzle client over Bun.sql, plus the migrator
   documents.ts                      text / pdf / docx extraction
   stored-document.ts                what an extracted document looks like
   tool-result.ts                    keeps `content` and `structuredContent` in step
 src/features/resume-review/
   index.ts                          the ToolModule: name, migrations, register()
-  migrations.ts                     this module's tables
+  schema.ts                         this module's tables (drizzle-kit reads these)
   sessions.ts                       repository, domain types, stage gating
   briefs.ts                         the three briefs
   schemas.ts                        zod schema per stage result
@@ -216,7 +224,6 @@ and guessing at the general case before a second one exists is how a platform la
 // src/features/interview-prep/index.ts
 export const interviewPrep: ToolModule = {
   name: "interview-prep",
-  migrations,                       // its own tables, namespaced in schema_migrations
   register(server) {
     registerWhateverTools(server);
   },
@@ -228,10 +235,14 @@ export const interviewPrep: ToolModule = {
 const server = createServer([resumeReview, interviewPrep]);
 ```
 
-That is the whole contract. Migrations are applied once each, tracked per module in
-`schema_migrations`, and run lazily the first time that module touches the database — an
-unused module costs no round trips. `tests/modules.test.ts` exercises the seam with a stub
-module that has nothing to do with resumes.
+That is the whole contract. Tables go in `src/features/interview-prep/schema.ts`, which the
+drizzle-kit glob picks up automatically; `bun run db:generate` then writes the migration.
+`tests/modules.test.ts` exercises the seam with a stub module that has nothing to do with
+resumes.
+
+The trade drizzle-kit imposes: one migrations folder and one journal for the whole project. A
+module still defines its own tables, but the migration history is shared rather than
+per-module.
 
 ## Contributing
 

@@ -6,13 +6,15 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
     "@types/bun": "latest",
-    "@types/node": "^26.2.0"
+    "@types/node": "^26.2.0",
+    "drizzle-kit": "^0.31.10"
   },
   "peerDependencies": {
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "drizzle-orm": "^0.45.2",
     "mammoth": "^1.12.1",
     "unpdf": "^1.8.1",
     "zod": "^4.4.3"
@@ -21,6 +23,7 @@
     "start": "bun index.ts",
     "serve": "bun serve.ts",
     "dev": "docker compose -f docker-compose.dev.yml up --build",
+    "db:generate": "drizzle-kit generate",
     "db:migrate": "bun scripts/migrate.ts",
     "db:check": "bun scripts/check-db.ts",
     "check": "biome check",
