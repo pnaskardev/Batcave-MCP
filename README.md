@@ -197,8 +197,42 @@ skip this, but then a broken migration surfaces as a failed user request rather 
 deploy, and the first caller waits for the schema. Re-run `db:migrate` on every deploy that ships
 a new migration; it is a no-op when there is nothing to apply.
 
-Compose refuses to start if either variable is unset. Keep them in the shell profile or an
-instance secret — not in a file in this repo.
+### Where the two variables come from
+
+Exporting them in the shell is one way. The other, and usually the better one on a long-lived
+box, is a `.env` file **next to `docker-compose.yml`**: Compose reads it automatically and uses it
+to fill the `${DB_URL}` and `${MCP_AUTH_TOKEN}` placeholders. Nothing in the compose file needs
+to change to use it. It is gitignored and dockerignored, so it is neither committed nor baked
+into an image layer.
+
+Three things worth knowing about that file, all of them verified rather than assumed:
+
+- **It must be named `.env` and sit in the project directory** — the one holding
+  `docker-compose.yml`, not wherever you happen to be standing. Keep it elsewhere and pass
+  `docker compose --env-file /path/to/it up -d` on every command, or Compose will not find it.
+- **An exported shell variable overrides it.** A stale `export MCP_AUTH_TOKEN=…` in a shell
+  profile silently wins over the file, which is a confusing way to deploy the wrong token.
+- **It fills the compose file's placeholders, not the container's environment.** Those are
+  different mechanisms: the `environment:` block is what actually puts the values in the
+  container. Deleting that block and relying on the file alone leaves the container with neither
+  variable set.
+
+To confirm the file is being picked up **without printing the secrets**:
+
+```bash
+docker compose config --quiet && echo "both variables resolve"
+```
+
+Exit 0 and no output means Compose found values for both. Plain `docker compose config`, with no
+`--quiet`, prints the fully resolved file — including your connection string and token — so do
+not paste its output anywhere.
+
+`env_file:` is the other way to wire this up, and this project deliberately does not use it. It
+injects the file into the container directly, which means the `${VAR:?}` guards never run: a file
+missing `MCP_AUTH_TOKEN` starts a container with no token instead of stopping the deploy, and
+`restart: unless-stopped` then crash-loops it. Mounting the file in as a volume is worse still —
+it relies on Bun autoloading whatever happens to be at the working directory, and puts the
+credential on the container's filesystem for no benefit.
 
 **The published port is `127.0.0.1:3000`, deliberately.** The endpoint speaks plaintext HTTP and
 authenticates with a bearer token: over the open internet that token is readable by anyone on
