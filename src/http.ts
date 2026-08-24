@@ -9,15 +9,37 @@ export interface HttpOptions {
   readonly onError?: (error: Error) => void;
 }
 
+/**
+ * Shortest token the server will serve with. One shared secret is the whole access control, and
+ * the endpoint is reachable from the public internet, so a guessable one is the same as no auth.
+ * `openssl rand -hex 32` gives 64 characters; this floor of 128 bits only rules out the passwords
+ * someone types by hand.
+ */
+export const MIN_TOKEN_LENGTH = 32;
+
+function assertUsableToken(token: string): void {
+  if (token.length < MIN_TOKEN_LENGTH) {
+    throw new Error(
+      `MCP_AUTH_TOKEN is ${token.length} characters; at least ${MIN_TOKEN_LENGTH} are required. ` +
+        "It is the only thing standing between the internet and this server. " +
+        "Generate one with `openssl rand -hex 32`.",
+    );
+  }
+}
+
 function tokenMatches(presented: string, expected: string): boolean {
   const a = Buffer.from(presented);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// The scheme is case-insensitive (RFC 7235 §2.1) and the token itself carries no spaces, so a
+// header of only whitespace after the scheme does not match at all rather than presenting a blank
+// token to the comparison.
+const BEARER = /^Bearer +([^ ]+)$/i;
+
 function bearer(request: Request): string | undefined {
-  const header = request.headers.get("authorization");
-  return header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : undefined;
+  return BEARER.exec(request.headers.get("authorization") ?? "")?.[1];
 }
 
 function unauthorized(): Response {
@@ -47,6 +69,7 @@ export function createFetchHandler(
   modules: readonly ToolModule[],
   options: HttpOptions,
 ): (request: Request) => Promise<Response> {
+  assertUsableToken(options.authToken);
   const handler = createMcpHandler(() => createServer(modules), { onerror: options.onError });
 
   return async (request: Request): Promise<Response> => {

@@ -16,7 +16,7 @@ That gives you:
 | | |
 |---|---|
 | MCP endpoint | `http://127.0.0.1:3000/mcp` |
-| Bearer token | `dev-token-not-a-secret` |
+| Bearer token | `dev-token-not-a-secret-do-not-deploy` |
 | Health check | `http://127.0.0.1:3000/healthz`, no auth |
 | Dev database | `postgres://postgres:postgres@localhost:55432/batcave` |
 | Test database | `postgres://postgres:postgres@localhost:55432/batcave_test` |
@@ -28,7 +28,7 @@ Smoke test it:
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/mcp \
-  -H 'authorization: Bearer dev-token-not-a-secret' \
+  -H 'authorization: Bearer dev-token-not-a-secret-do-not-deploy' \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'

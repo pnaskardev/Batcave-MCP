@@ -43,7 +43,7 @@ services:
       DB_URL: postgres://postgres:postgres@postgres:5432/batcave
       # A fixed local token: every contributor's client is configured the same way, and there is
       # nothing here worth protecting. Production generates a real one — see README.
-      MCP_AUTH_TOKEN: dev-token-not-a-secret
+      MCP_AUTH_TOKEN: dev-token-not-a-secret-do-not-deploy
       PORT: 3000
     ports:
       - "127.0.0.1:3000:3000"

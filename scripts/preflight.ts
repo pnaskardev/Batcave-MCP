@@ -9,6 +9,7 @@
  *
  * Exits non-zero if any check fails, so it can gate a deploy.
  */
+import { MIN_TOKEN_LENGTH } from "../src/http";
 import { inspect } from "../src/platform/db";
 
 const PORT = Number(process.env.PREFLIGHT_PORT ?? 3999);
@@ -26,7 +27,12 @@ const dbUrl = process.env.DB_URL ?? process.env.DATABASE_URL;
 
 if (token) {
   pass(`MCP_AUTH_TOKEN set (${token.length} chars)`);
-  if (token.length < 32) fail("token is short — generate one with `openssl rand -hex 32`");
+  if (token.length < MIN_TOKEN_LENGTH) {
+    fail(
+      `token is under ${MIN_TOKEN_LENGTH} characters — the server will refuse to start. ` +
+        "Generate one with `openssl rand -hex 32`",
+    );
+  }
 } else {
   fail("MCP_AUTH_TOKEN is not set");
 }

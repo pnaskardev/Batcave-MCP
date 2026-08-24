@@ -57,6 +57,39 @@ container serving stdio would accept no connections, which is why the EC2 path u
 `GET /healthz` is the only unauthenticated route. It opens no database connection, so a load
 balancer polling it never wakes Postgres.
 
+## Access control
+
+One shared bearer token gates every route except `/healthz`. What that buys, precisely:
+
+- **The token is checked before anything else runs.** No module registers a side effect, and no
+  database connection opens, on an unauthenticated request. `/mcp` is the only authenticated path;
+  everything else is a 404, with or without a token.
+- **Comparison is constant-time** (`timingSafeEqual`), so a wrong token cannot be recovered one
+  character at a time by measuring how fast it is rejected. Only the token's *length* is
+  observable.
+- **The token must be at least 32 characters** or the server refuses to start, at construction of
+  the HTTP handler rather than in an entrypoint — a new entrypoint cannot forget the check.
+- **It travels in a header, never a URL.** `/mcp?token=…` is a 401. Query strings end up in proxy
+  logs and browser history; headers do not.
+- **A 401 carries no `WWW-Authenticate`.** In MCP that header is the OAuth discovery signal, and
+  this server publishes no authorization server metadata to discover.
+
+`tests/http-auth.test.ts` asserts all of it from the caller's side — every test there expects a
+refusal. Deleting the auth check turns 13 of them red.
+
+What the token does **not** do, and you should size your exposure accordingly:
+
+| | |
+|---|---|
+| **It identifies nobody.** | One secret for everyone. Anyone holding it reads and deletes every session, including a friend's. Per-user access needs real auth and an owner column on `resume_sessions`; neither exists. |
+| **It is only as private as the transport.** | The app speaks plaintext HTTP. Without TLS in front, the token is readable by anything on the path — that is why the container publishes to `127.0.0.1` only. |
+| **Nothing rate-limits a guess.** | Fine at 256 bits of entropy, and the reason the length floor exists. Do not lower it. |
+| **Anyone who can reach port 443 can try.** | Restrict the security group to the clients you expect. For claude.ai that is `160.79.104.0/21`. |
+| **Rotation is a restart.** | `export MCP_AUTH_TOKEN=… && docker compose up -d`. There is no revocation list and no second valid token during a rollover. |
+
+Sessions hold whole resumes — names, phone numbers, addresses. Treat the token as the credential
+protecting that.
+
 ## Storage
 
 Everything lives in Postgres. The server writes nothing to local disk — the only local reads are
@@ -95,7 +128,8 @@ bun run dev        # Postgres + the server, hot reload, nothing to configure
 
 That is `docker compose -f docker-compose.dev.yml up --build`: it brings up Postgres, creates the
 dev and test databases, runs the migrations, and serves MCP on `http://127.0.0.1:3000/mcp` with
-the token `dev-token-not-a-secret`. Editing anything under `src/` reloads the running server.
+the token `dev-token-not-a-secret-do-not-deploy`. Editing anything under `src/` reloads the
+running server.
 
 To run the server directly on the host instead:
 
@@ -172,10 +206,8 @@ the path. Put TLS in front of it — an ALB terminating HTTPS and forwarding to 
 nginx/Caddy on the same box proxying to `127.0.0.1:3000`. Then the security group should allow
 443 from your clients and nothing else; port 3000 stays closed to the world.
 
-Rotating the token is `export MCP_AUTH_TOKEN=... && docker compose up -d`, which restarts the
-container. There is one token for everyone — it identifies nobody, so it cannot tell your
-sessions apart from a friend's. Per-user access needs real auth and an owner column on
-`resume_sessions`; neither exists yet.
+See [Access control](#access-control) for what the bearer token does and does not protect, and
+how to rotate it.
 
 **`resume_path` resolves inside the container**, so a remote caller cannot use it — paths on
 their laptop mean nothing to the server. Over HTTP, pass `resume_text` and

@@ -30,6 +30,24 @@ These are properties of the current design, not bugs. Know them before you deplo
   filesystem, which is why remote callers should pass text instead. Do not expose the HTTP
   endpoint to callers you would not grant read access to that path.
 
+## Before you expose it
+
+1. **Generate the token properly** — `openssl rand -hex 32`. The server refuses to start on
+   anything under 32 characters, but a long guessable string still passes that check.
+2. **Terminate TLS in front of it** and keep the app on `127.0.0.1:3000`. Confirm from off the
+   box that port 3000 does not answer.
+3. **Restrict the security group** to the clients you expect. For claude.ai that is
+   `160.79.104.0/21`; port 3000 open to `0.0.0.0/0` is the same as publishing your sessions.
+4. **Run `bun run preflight` on the box.** It boots the real entrypoint and checks that an
+   anonymous request and a wrong token are both rejected before it reports ready.
+5. **Keep the token out of URLs, shells, and chat.** It belongs in an instance secret or the
+   shell profile. `/mcp?token=…` is rejected precisely so it never reaches a proxy log.
+6. **Rotate with `export MCP_AUTH_TOKEN=… && docker compose up -d`.** That restarts the
+   container; there is no revocation list and no overlap window where both tokens work.
+
+`tests/http-auth.test.ts` is the executable version of the first point and runs in CI. Everything
+else on this list is outside the repo and nothing here can verify it for you.
+
 ## Supported versions
 
 The project is pre-1.0 and only the `main` branch receives fixes.
