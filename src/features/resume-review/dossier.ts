@@ -1,10 +1,16 @@
 import type { z } from "zod";
-import type { atsPassSchema, experienceRewriteSchema, matchReportSchema } from "./schemas";
+import type {
+  atsPassSchema,
+  experienceRewriteSchema,
+  latexEditSchema,
+  matchReportSchema,
+} from "./schemas";
 import type { ReviewSession } from "./sessions";
 
 type MatchReport = z.infer<typeof matchReportSchema>;
 type ExperienceRewrite = z.infer<typeof experienceRewriteSchema>;
 type AtsPass = z.infer<typeof atsPassSchema>;
+type LatexEdit = z.infer<typeof latexEditSchema>;
 
 function renderMatchReport(report: MatchReport): string {
   const keywords = report.missing_keywords
@@ -80,6 +86,26 @@ function renderAtsPass(pass: AtsPass): string {
   ].join("\n");
 }
 
+function renderLatexEdit(edit: LatexEdit): string {
+  const skipped = edit.edits_not_applied.map((e) => `- **${e.change}** — ${e.reason}`).join("\n");
+  return [
+    "## Stage 4 — LaTeX source",
+    "",
+    ...(edit.preamble_changed
+      ? ["The preamble changed — recompile before trusting this file.", ""]
+      : []),
+    ...(edit.compile_risks.length
+      ? ["### Compile risks", edit.compile_risks.map((r) => `- ${r}`).join("\n"), ""]
+      : []),
+    ...(skipped ? ["### Changes the template could not carry", skipped, ""] : []),
+    "### Edited .tex source",
+    "",
+    "```latex",
+    edit.edited_latex,
+    "```",
+  ].join("\n");
+}
+
 export function renderDossier(session: ReviewSession): string {
   const parts = [
     `# Resume review — ${session.role} @ ${session.company}`,
@@ -92,7 +118,9 @@ export function renderDossier(session: ReviewSession): string {
   const pass = session.stages.ats_pass?.result as AtsPass | undefined;
   if (report) parts.push("", renderMatchReport(report));
   if (rewrite) parts.push("", renderRewrite(rewrite));
+  const latex = session.stages.latex_edit?.result as LatexEdit | undefined;
   if (pass) parts.push("", renderAtsPass(pass));
+  if (latex) parts.push("", renderLatexEdit(latex));
   if (!report && !rewrite && !pass) {
     parts.push("", "_No stage has been completed yet._");
   }

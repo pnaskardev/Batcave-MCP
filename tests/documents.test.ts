@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadDocument } from "../src/platform/documents";
+import { loadDocument, loadLatex } from "../src/platform/documents";
 
 let dir: string;
 
@@ -38,4 +38,36 @@ test("reports where the text came from and how big it is", async () => {
   expect(document.format).toBe("md");
   expect(document.source).toBe(path);
   expect(document.chars).toBe(BODY.trim().length);
+});
+
+const TEX = `\\documentclass{article}
+\\begin{document}
+\\section{Experience}
+
+
+Acme Corp, Backend Engineer, 2021--2024. Cut p99 latency 40\\%.
+\\end{document}
+`.padEnd(200, "%");
+
+test("latex intake requires exactly one of text or path", async () => {
+  await expect(loadLatex({})).rejects.toThrow("got neither");
+  await expect(loadLatex({ text: TEX, path: "/x.tex" })).rejects.toThrow("got both");
+});
+
+test("latex intake refuses text extracted from the rendered PDF", async () => {
+  await expect(loadLatex({ text: BODY })).rejects.toThrow("does not look like LaTeX source");
+});
+
+test("latex intake refuses a file that has no source to edit", async () => {
+  const path = join(dir, "resume.pdf");
+  await Bun.write(path, TEX);
+  await expect(loadLatex({ path })).rejects.toThrow("expected .tex or .latex");
+});
+
+test("latex intake keeps the source byte-for-byte, blank lines included", async () => {
+  const path = join(dir, "resume.tex");
+  await Bun.write(path, TEX);
+  const document = await loadLatex({ path });
+  expect(document.text).toBe(TEX);
+  expect(document.format).toBe("latex");
 });

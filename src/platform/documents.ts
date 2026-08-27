@@ -83,3 +83,49 @@ export async function loadDocument(
   if (text === undefined) throw new Error(`${bothOrNeither} (got neither).`);
   return describe(label, normalize(text), "inline text", "text");
 }
+
+const LATEX_EXTENSIONS = new Set([".tex", ".latex"]);
+
+/** Cheap proof the caller sent source and not the rendered output of it. */
+function assertLatex(text: string, source: string): void {
+  if (!/\\(?:documentclass|begin\s*\{document\})/.test(text)) {
+    throw new Error(
+      `${source} does not look like LaTeX source: no \\documentclass and no \\begin{document}. ` +
+        `Pass the .tex file the candidate compiles, not the text extracted from the PDF it ` +
+        `produces — editing extracted text would throw the template away.`,
+    );
+  }
+}
+
+/**
+ * Reads a LaTeX resume. Deliberately not `loadDocument`: that one collapses runs of blank lines,
+ * and here the file goes back to the candidate for a line-by-line review, where reflowed
+ * whitespace is a diff they have to read and dismiss. The bytes stay as they arrived.
+ */
+export async function loadLatex(input: { text?: string; path?: string }): Promise<StoredDocument> {
+  const text = present(input.text);
+  const path = present(input.path);
+  const bothOrNeither = "Provide exactly one of latex_text or latex_path";
+
+  if (path !== undefined) {
+    if (text !== undefined) throw new Error(`${bothOrNeither} (got both).`);
+    const resolved = expandPath(path);
+    const ext = extname(resolved).toLowerCase();
+    if (!LATEX_EXTENSIONS.has(ext)) {
+      throw new Error(
+        `${resolved} is not a LaTeX source file (expected .tex or .latex, got "${ext}"). ` +
+          `This stage edits the source the candidate compiles; a .pdf or .docx has no source ` +
+          `to edit.`,
+      );
+    }
+    const file = Bun.file(resolved);
+    if (!(await file.exists())) throw new Error(`File not found: ${resolved}`);
+    const contents = await file.text();
+    assertLatex(contents, resolved);
+    return describe("latex_resume", contents, resolved, "latex");
+  }
+
+  if (text === undefined) throw new Error(`${bothOrNeither} (got neither).`);
+  assertLatex(text, "The text passed as latex_text");
+  return describe("latex_resume", text, "inline text", "latex");
+}

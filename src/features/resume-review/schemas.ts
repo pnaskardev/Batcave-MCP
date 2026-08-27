@@ -118,6 +118,59 @@ export const atsPassSchema = z
   })
   .describe("Stage 3 output: ATS filter plus 200-resume hiring manager pass.");
 
+export const latexEditSchema = z
+  .object({
+    edited_latex: z
+      .string()
+      .describe(
+        "The complete .tex source after the edits — the whole file, compilable as it stands, " +
+          "not a diff and not the body alone.",
+      ),
+    edits: z
+      .array(
+        z.object({
+          section: z.string().describe("Which part of the document this changed."),
+          latex_before: z.string().describe("The source as it was, verbatim."),
+          latex_after: z.string().describe("The source as it now reads, verbatim."),
+          carries: z
+            .string()
+            .describe("The stage-3 rewrite or stage-2 bullet this edit puts into the source."),
+        }),
+      )
+      .describe(
+        "Every change made, so the candidate can review the diff without reading the file.",
+      ),
+    edits_not_applied: z
+      .array(
+        z.object({
+          change: z.string().describe("The stage-3 change that did not make it in."),
+          reason: z
+            .string()
+            .describe(
+              "Why the source could not carry it: a macro with the wrong arity, a section the " +
+                "template has no slot for, a length that would overflow the page.",
+            ),
+        }),
+      )
+      .describe(
+        "Stage-3 changes this template could not absorb. Reporting one here is the correct " +
+          "outcome; silently dropping it is not.",
+      ),
+    preamble_changed: z
+      .boolean()
+      .describe(
+        "True if any package, macro definition, class, or class option changed. True means the " +
+          "candidate has to recompile before trusting the result.",
+      ),
+    compile_risks: z
+      .array(z.string())
+      .describe(
+        "Anything that might not compile: an unescaped special character, a macro used outside " +
+          "where the template defines it, content long enough to push the page.",
+      ),
+  })
+  .describe("Stage 4 output: the stage-3 resume applied to the candidate's LaTeX source.");
+
 /** Every stage tool answers with the same envelope, in either of its two modes. */
 export const stageEnvelopeSchema = z.object({
   session_id: z.string(),

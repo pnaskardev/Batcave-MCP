@@ -10,9 +10,9 @@ export function registerDossierTool(server: McpServer): void {
     {
       title: "Export review dossier",
       description:
-        "Returns everything recorded for a session — match report, XYZ rewrite, ATS pass, and " +
-        "the final resume — as one markdown document. Returns the text rather than writing a " +
-        "file; save it wherever you want it.",
+        "Returns everything recorded for a session — match report, XYZ rewrite, ATS pass, the " +
+        "final resume, and the edited .tex source if the LaTeX stage ran — as one markdown " +
+        "document. Returns the text rather than writing a file; save it wherever you want it.",
       inputSchema: z.object({
         session_id: z.string().describe("Session id returned by start_review."),
       }),

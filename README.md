@@ -2,7 +2,8 @@
 
 An MCP server that takes two documents — a **resume** and a **job description** — and runs them
 through a three-stage review. Each stage feeds the next: you cannot rewrite before you have a
-match report, and you cannot run the ATS pass before you have a rewrite.
+match report, and you cannot run the ATS pass before you have a rewrite. An optional fourth
+stage applies the result to a LaTeX resume, if the candidate keeps one and asks for it.
 
 ## The pipeline
 
@@ -12,9 +13,10 @@ match report, and you cannot run the ATS pass before you have a rewrite.
 | `resume_match_report` | **Stage 1.** Senior recruiter at the target company: match score out of 100, top 5 missing keywords, 3 red flags a hiring manager spots in under 10 seconds. |
 | `rewrite_experience_xyz` | **Stage 2.** Rewrites the experience section to carry stage 1's keywords and remove its red flags, every bullet in the Google XYZ form — accomplished X as measured by Y by doing Z. |
 | `ats_scroll_stopper_pass` | **Stage 3.** ATS parser pass plus a hiring manager on resume #147 of 200: which sections get skipped, then rewrites them to stop the scroll. Returns the final resume. |
+| `edit_latex_resume` | **Stage 4, optional.** Applies the stage-3 resume to the candidate's own `.tex` source and returns the edited file. Only runs if they hand over a source file — see below. |
 | `session_status` | Which stages are done, awaiting a result, or not started, and what to call next. |
 | `list_sessions` | Stored sessions, most recently updated first. |
-| `export_dossier` | Returns the whole review — all three stages plus the final resume — as one markdown document. |
+| `export_dossier` | Returns the whole review — every recorded stage, the final resume, and the edited `.tex` source if stage 4 ran — as one markdown document. |
 | `delete_session` | Deletes a session and everything stored against it. Nothing expires on its own. |
 
 ## How a stage runs
@@ -29,6 +31,27 @@ the connected client's model does the reasoning. So each stage tool is called tw
 
 Stage 2 reads the recorded stage 1 report. Stage 3 reads `updated_resume` from stage 2, not the
 original. A stage called out of order fails with the tool name you need to call first.
+
+## The optional LaTeX stage
+
+The review is complete at stage 3. Stage 4 exists for the candidate who writes their resume in
+LaTeX and wants the source itself updated, so **ask them once stage 3 is recorded** — stage 3's
+`next_step` says so, and so does `session_status`.
+
+- **No** — call `export_dossier` and stop. Nothing is pending; `session_status` reports
+  `latex_edit: not_started` for a finished review.
+- **Yes** — call `edit_latex_resume` with their `.tex` file as `latex_text` or `latex_path`. The
+  source is the opt-in: with no file supplied and none stored, the tool refuses and says so.
+
+It edits the source and nothing else. **It never compiles anything and never produces a PDF** —
+`edited_latex` comes back as the complete `.tex` file for the candidate to copy, adjust
+themselves, compile, and submit. Their template is left alone: document class, packages, custom
+macros, and section order stay as written, and a stage-3 change the template cannot carry is
+reported in `edits_not_applied` rather than dropped. The intake refuses text extracted from a
+rendered PDF — editing that would throw the template away.
+
+Because it is optional, it stays out of the count: `list_sessions` still reports `x/3` and flags
+the LaTeX stage separately.
 
 ## Two rules baked into the briefs
 

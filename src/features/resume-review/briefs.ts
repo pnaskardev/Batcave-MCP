@@ -1,3 +1,4 @@
+import type { StoredDocument } from "../../platform/stored-document";
 import type { ReviewSession } from "./sessions";
 import { STAGE_TOOLS, type StageName } from "./stage";
 
@@ -132,5 +133,46 @@ export function atsPassBrief(
     fence("Current resume (post stage-2 rewrite)", currentResume),
     "",
     returnBlock(session, "ats_pass"),
+  ].join("\n");
+}
+
+export function latexEditBrief(
+  session: ReviewSession,
+  latex: StoredDocument,
+  atsPass: Record<string, unknown>,
+): string {
+  return [
+    `# Stage 4 — Apply the reviewed resume to the LaTeX source (${session.company})`,
+    "",
+    "The candidate keeps their resume in LaTeX and has asked for the source itself to be",
+    "edited. Put the stage-3 resume into the .tex file below and return the whole file.",
+    "",
+    "## Rules",
+    "",
+    "- **The template is not yours to redesign.** Document class, packages, custom macros,",
+    "  spacing, and section ordering stay as the candidate wrote them. You are changing the",
+    "  content inside the existing structure and nothing else.",
+    "- Use the macros the file already defines. If it has `\\resumeItem{...}`, a new bullet is",
+    "  `\\resumeItem{...}` too — do not hand-roll `\\item` next to them.",
+    "- **Escape LaTeX specials in every string you insert:** `&` `%` `$` `#` `_` become `\\&`",
+    "  `\\%` `\\$` `\\#` `\\_`; `~` and `^` become `\\textasciitilde{}` and",
+    "  `\\textasciicircum{}`. An unescaped `%` comments out the rest of its line, which is the",
+    "  most common way this stage quietly breaks a resume.",
+    "- Leave every `[QUANTIFY: ...]` marker exactly as written. The candidate fills those in;",
+    "  inventing the number for them is the failure mode stage 2 exists to avoid.",
+    "- If the template cannot carry a stage-3 change — no slot for the section, a macro with a",
+    "  different arity, content that would clearly overflow the page — record it in",
+    "  `edits_not_applied` and move on. A reported miss is a correct outcome; a silent drop is",
+    "  not.",
+    "- Do not compile anything and do not produce a PDF. The source is the deliverable: the",
+    "  candidate compiles it themselves and submits it.",
+    "- `edited_latex` is the complete file, `\\documentclass` through `\\end{document}` — not a",
+    "  diff, not the body alone, not an excerpt with elisions.",
+    "",
+    fence("Stage 3 result — the resume to apply", JSON.stringify(atsPass, null, 2)),
+    "",
+    fence(`LaTeX source (${latex.source})`, latex.text),
+    "",
+    returnBlock(session, "latex_edit"),
   ].join("\n");
 }

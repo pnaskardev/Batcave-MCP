@@ -8,7 +8,7 @@ import {
   type ReviewSession,
   stageStatus,
 } from "../sessions";
-import { STAGE_ORDER, STAGE_TOOLS, type StageName } from "../stage";
+import { LATEX_STAGE, STAGE_ORDER, STAGE_TOOLS, type StageName } from "../stage";
 
 const sessionIdSchema = z.string().describe("Session id returned by start_review.");
 
@@ -22,8 +22,23 @@ function nextStep(session: ReviewSession): string {
       return `${STAGE_TOOLS[stage]} is waiting on its result — call it again with the result.`;
     }
   }
-  return `All three stages complete. Call export_dossier with session_id "${session.id}".`;
+  // The LaTeX stage is opt-in, so "not started" is a finished review, not an outstanding step.
+  const latex = stageStatus(session, LATEX_STAGE);
+  if (latex === "awaiting_result") {
+    return `${STAGE_TOOLS[LATEX_STAGE]} is waiting on its result — call it again with the result.`;
+  }
+  if (latex === "complete") {
+    return `All stages complete, LaTeX source included. Call export_dossier with session_id "${session.id}".`;
+  }
+  return (
+    `All three stages complete. Ask the candidate whether their resume is in LaTeX and they ` +
+    `want the source edited: if yes, call ${STAGE_TOOLS[LATEX_STAGE]} with session_id ` +
+    `"${session.id}" and their .tex file; if no, call export_dossier.`
+  );
 }
+
+/** The required chain plus the optional stage, which reads "not_started" until it is asked for. */
+const REPORTED_STAGES: readonly StageName[] = [...STAGE_ORDER, LATEX_STAGE];
 
 function registerStatusTool(server: McpServer): void {
   server.registerTool(
@@ -45,10 +60,10 @@ function registerStatusTool(server: McpServer): void {
     async ({ session_id }) => {
       const session = await loadSession(session_id);
       const stages = Object.fromEntries(
-        STAGE_ORDER.map((stage: StageName) => [stage, stageStatus(session, stage)]),
+        REPORTED_STAGES.map((stage: StageName) => [stage, stageStatus(session, stage)]),
       );
       const next_step = nextStep(session);
-      const lines = STAGE_ORDER.map((stage: StageName) => `- ${stage}: ${stages[stage]}`).join(
+      const lines = REPORTED_STAGES.map((stage: StageName) => `- ${stage}: ${stages[stage]}`).join(
         "\n",
       );
       return toolResult(
@@ -82,6 +97,7 @@ function registerListTool(server: McpServer): void {
             role: z.string(),
             updated_at: z.string(),
             stages_complete: z.number(),
+            latex_edited: z.boolean(),
           }),
         ),
       }),
@@ -93,10 +109,15 @@ function registerListTool(server: McpServer): void {
         role: summary.role,
         updated_at: summary.updated_at,
         stages_complete: summary.stages_complete,
+        latex_edited: summary.latex_edited,
       }));
       const text = sessions.length
         ? sessions
-            .map((s) => `${s.session_id}  ${s.stages_complete}/3  ${s.role} @ ${s.company}`)
+            .map(
+              (s) =>
+                `${s.session_id}  ${s.stages_complete}/3${s.latex_edited ? " +tex" : ""}  ` +
+                `${s.role} @ ${s.company}`,
+            )
             .join("\n")
         : "No sessions yet. Start one with start_review.";
       return toolResult(text, { sessions });

@@ -20,6 +20,8 @@ export const resumeSessions = pgTable(
     // $type is what buys the type safety: reads come back as StoredDocument, not `unknown`.
     resume: jsonb("resume").$type<StoredDocument>().notNull(),
     jobDescription: jsonb("job_description").$type<StoredDocument>().notNull(),
+    // Nullable: only sessions that reach the optional LaTeX stage ever carry a source file.
+    latexSource: jsonb("latex_source").$type<StoredDocument>(),
   },
   (table) => [index("resume_sessions_updated_at_idx").on(table.updatedAt.desc())],
 );

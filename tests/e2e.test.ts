@@ -19,6 +19,8 @@ const RESUME =
 const JD =
   "Staff Platform Engineer at Wayne Enterprises. Own our Kubernetes platform, drive Go " +
   "services, run Terraform on AWS, and improve observability with Prometheus. SLO ownership.";
+const TEX =
+  "\\documentclass{article}\n\\begin{document}\n\\resumeItem{Old bullet}\n\\end{document}";
 
 /** Just enough of a JSON-RPC response for these tests to assert on. */
 interface RpcResponse {
@@ -113,7 +115,7 @@ afterAll(async () => {
   await sql.close();
 });
 
-dbTest("the server advertises the intake, the three stages, and the support tools", async () => {
+dbTest("the server advertises the intake, the stages, and the support tools", async () => {
   const { result } = await send("tools/list");
   const tools = result?.tools as { name: string }[];
   expect(tools.map((tool) => tool.name)).toEqual([
@@ -121,6 +123,7 @@ dbTest("the server advertises the intake, the three stages, and the support tool
     "resume_match_report",
     "rewrite_experience_xyz",
     "ats_scroll_stopper_pass",
+    "edit_latex_resume",
     "export_dossier",
     "session_status",
     "list_sessions",
@@ -236,12 +239,15 @@ dbTest("the three stages chain through one session", async () => {
     },
   });
   expect(stageThree.text).toContain("Pipeline complete");
+  expect(stageThree.text).toContain("is your resume in LaTeX");
 
+  // The optional stage stays out of the way of a candidate who never asks for it.
   const status = await callTool("session_status", { session_id });
   expect(structured(status, "session_status").stages).toEqual({
     match_report: "complete",
     experience_rewrite: "complete",
     ats_pass: "complete",
+    latex_edit: "not_started",
   });
 
   const dossier = await callTool("export_dossier", { session_id });
@@ -249,16 +255,90 @@ dbTest("the three stages chain through one session", async () => {
   expect(markdown).toContain("**Score: 41/100.**");
   expect(markdown).toContain("Platform: Kubernetes, Go");
   expect(markdown).toContain("p99 latency reduction in ms");
+  expect(markdown).not.toContain("Stage 4");
 
   const listed = await callTool("list_sessions", { limit: 20 });
   expect(structured(listed, "list_sessions").sessions).toContainEqual(
-    expect.objectContaining({ session_id, stages_complete: 3 }),
+    expect.objectContaining({ session_id, stages_complete: 3, latex_edited: false }),
   );
 
   const deleted = await callTool("delete_session", { session_id });
   expect(structured(deleted, "delete_session").deleted).toBe(true);
   const gone = await callTool("session_status", { session_id });
   expect(gone.isError).toBe(true);
+});
+
+dbTest("the LaTeX stage runs only once the candidate hands over a source file", async () => {
+  const started = await callTool("start_review", {
+    resume_text: RESUME,
+    job_description_text: JD,
+  });
+  const session_id = structured(started, "start_review").session_id as string;
+
+  const early = await callTool("edit_latex_resume", { session_id, latex_text: TEX });
+  expect(early.isError).toBe(true);
+  expect(early.text).toContain("Call ats_scroll_stopper_pass first");
+
+  await callTool("ats_scroll_stopper_pass", {
+    session_id,
+    result: {
+      ats_findings: [],
+      skipped_sections: [],
+      rewritten_sections: [],
+      final_resume: `${RESUME}\n\nSKILLS\nPlatform: Kubernetes, Go`,
+      final_verdict: { ats_pass_likelihood: "medium", would_shortlist: true, remaining_gaps: [] },
+    },
+  });
+
+  // No source, no stage — and the error says so rather than sending the caller hunting.
+  const notOpted = await callTool("edit_latex_resume", { session_id });
+  expect(notOpted.isError).toBe(true);
+  expect(notOpted.text).toContain("the review is complete without it");
+
+  const rejected = await callTool("edit_latex_resume", { session_id, latex_text: RESUME });
+  expect(rejected.isError).toBe(true);
+  expect(rejected.text).toContain("does not look like LaTeX source");
+
+  const brief = await callTool("edit_latex_resume", { session_id, latex_text: TEX });
+  expect(structured(brief, "edit_latex_resume").mode).toBe("brief");
+  expect(brief.text).toContain("\\resumeItem{Old bullet}");
+  expect(brief.text).toContain("Platform: Kubernetes, Go");
+
+  const edited = TEX.replace("Old bullet", "Cut p99 latency by [QUANTIFY: ms]");
+  const recorded = await callTool("edit_latex_resume", {
+    session_id,
+    result: {
+      edited_latex: edited,
+      edits: [
+        {
+          section: "Experience",
+          latex_before: "\\resumeItem{Old bullet}",
+          latex_after: "\\resumeItem{Cut p99 latency by [QUANTIFY: ms]}",
+          carries: "the stage-3 experience rewrite",
+        },
+      ],
+      edits_not_applied: [
+        { change: "Skills sidebar", reason: "the template has no second column" },
+      ],
+      preamble_changed: false,
+      compile_risks: ["an unescaped % would comment out the line"],
+    },
+  });
+  expect(structured(recorded, "edit_latex_resume").edited_latex).toBe(edited);
+  expect(recorded.text).toContain("```latex");
+  expect(recorded.text).toContain("Not applied: Skills sidebar");
+
+  // The source is stored, so a second brief needs no file passed again.
+  const rebrief = await callTool("edit_latex_resume", { session_id });
+  expect(rebrief.isError).toBe(false);
+
+  const listed = await callTool("list_sessions", { limit: 20 });
+  expect(structured(listed, "list_sessions").sessions).toContainEqual(
+    // The optional stage is reported on its own, never folded into the count of three.
+    expect.objectContaining({ session_id, stages_complete: 1, latex_edited: true }),
+  );
+
+  await callTool("delete_session", { session_id });
 });
 
 dbTest("an unknown session explains how to recover", async () => {

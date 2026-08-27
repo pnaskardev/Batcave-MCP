@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
-import { atsPassBrief, experienceRewriteBrief } from "../src/features/resume-review/briefs";
-import { type ReviewSession, requireStageResult } from "../src/features/resume-review/sessions";
+import {
+  atsPassBrief,
+  experienceRewriteBrief,
+  latexEditBrief,
+} from "../src/features/resume-review/briefs";
+import {
+  type ReviewSession,
+  requireLatexSource,
+  requireStageResult,
+} from "../src/features/resume-review/sessions";
 import type { StoredDocument } from "../src/platform/stored-document";
 
 const doc = (text: string): StoredDocument => ({
@@ -67,4 +75,33 @@ test("stage 3 scans the stage 2 resume, not the original", () => {
   );
   expect(brief).toContain("REWRITTEN RESUME BODY");
   expect(brief).not.toContain("Acme Corp, Backend Engineer");
+});
+
+const TEX =
+  "\\documentclass{article}\n\\begin{document}\n\\resumeItem{Old bullet}\n\\end{document}";
+
+test("the LaTeX stage says how to opt in, and that skipping it finishes the review", () => {
+  expect(() => requireLatexSource(session())).toThrow("latex_text or latex_path");
+  expect(() => requireLatexSource(session())).toThrow("the review is complete without it");
+});
+
+test("a stored LaTeX source satisfies the opt-in", () => {
+  const opted = { ...session(), latex_source: doc(TEX) };
+  expect(requireLatexSource(opted).text).toBe(TEX);
+});
+
+test("stage 4 briefs the model with the source file and the stage 3 result", () => {
+  const done = session({
+    ats_pass: {
+      status: "complete",
+      issued_at: "now",
+      result: { final_resume: "FINAL RESUME BODY" },
+    },
+  });
+  const brief = latexEditBrief(done, doc(TEX), requireStageResult(done, "ats_pass"));
+  expect(brief).toContain("\\resumeItem{Old bullet}");
+  expect(brief).toContain("FINAL RESUME BODY");
+  expect(brief).toContain("[QUANTIFY: ...]");
+  expect(brief).toContain("Do not compile anything and do not produce a PDF");
+  expect(brief).toContain("edit_latex_resume");
 });

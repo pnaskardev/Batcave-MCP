@@ -61,7 +61,9 @@ export function registerStageTools(server: McpServer): void {
       return atsPassBrief(session, rewrite.updated_resume as string, matchReport);
     },
     nextStep: (session) =>
-      `Pipeline complete for session ${session.id}. Call export_dossier for the full report ` +
-      `and the final resume.`,
+      `Pipeline complete for session ${session.id}. Now ask the candidate: is your resume in ` +
+      `LaTeX, and do you want the .tex source edited to match? If yes, call ` +
+      `edit_latex_resume with session_id "${session.id}" and their .tex file. If no, the ` +
+      `review is finished — call export_dossier for the full report and the final resume.`,
   });
 }

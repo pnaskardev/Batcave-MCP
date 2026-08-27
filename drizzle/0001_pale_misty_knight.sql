@@ -1,0 +1,1 @@
+ALTER TABLE "resume_sessions" ADD COLUMN "latex_source" jsonb;

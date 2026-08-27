@@ -2,7 +2,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../../platform/db";
 import type { StoredDocument } from "../../platform/stored-document";
 import { resumeSessions, resumeStages } from "./schema";
-import { STAGE_TOOLS, type StageName, type StageStatus } from "./stage";
+import { LATEX_STAGE, STAGE_TOOLS, type StageName, type StageStatus } from "./stage";
 
 export interface StageRecord {
   status: StageStatus;
@@ -19,6 +19,8 @@ export interface ReviewSession {
   role: string;
   resume: StoredDocument;
   job_description: StoredDocument;
+  /** Present only once the candidate has handed over a source file for the LaTeX stage. */
+  latex_source?: StoredDocument;
   stages: Partial<Record<StageName, StageRecord>>;
 }
 
@@ -28,6 +30,7 @@ export interface SessionSummary {
   role: string;
   updated_at: string;
   stages_complete: number;
+  latex_edited: boolean;
 }
 
 const ID_PATTERN = /^[a-z0-9]{4,32}$/;
@@ -106,8 +109,18 @@ export async function loadSession(id: string): Promise<ReviewSession> {
     role: session.role,
     resume: session.resume,
     job_description: session.jobDescription,
+    ...(session.latexSource ? { latex_source: session.latexSource } : {}),
     stages,
   };
+}
+
+/** Attaches the candidate's LaTeX source to an existing session, replacing any earlier one. */
+export async function saveLatexSource(id: string, latex: StoredDocument): Promise<void> {
+  assertId(id);
+  await db()
+    .update(resumeSessions)
+    .set({ latexSource: latex, updatedAt: new Date() })
+    .where(eq(resumeSessions.id, id));
 }
 
 /** Deliberately does not select the documents — a listing has no use for two full resumes. */
@@ -118,9 +131,18 @@ export async function listSessions(limit: number): Promise<SessionSummary[]> {
       company: resumeSessions.company,
       role: resumeSessions.role,
       updatedAt: resumeSessions.updatedAt,
+      // Counts the required chain only, so the figure stays out of three however many optional
+      // stages exist. The LaTeX stage is reported on its own rather than inflating the count.
       stagesComplete: sql<number>`
-        count(${resumeStages.stage}) filter (where ${resumeStages.status} = 'complete')
+        count(${resumeStages.stage}) filter (
+          where ${resumeStages.status} = 'complete' and ${resumeStages.stage} <> ${LATEX_STAGE}
+        )
       `.mapWith(Number),
+      latexEdited: sql<boolean>`
+        coalesce(bool_or(
+          ${resumeStages.status} = 'complete' and ${resumeStages.stage} = ${LATEX_STAGE}
+        ), false)
+      `.mapWith(Boolean),
     })
     .from(resumeSessions)
     .leftJoin(resumeStages, eq(resumeStages.sessionId, resumeSessions.id))
@@ -134,6 +156,7 @@ export async function listSessions(limit: number): Promise<SessionSummary[]> {
     role: row.role,
     updated_at: row.updatedAt.toISOString(),
     stages_complete: row.stagesComplete,
+    latex_edited: row.latexEdited,
   }));
 }
 
@@ -180,6 +203,24 @@ export async function deleteSession(id: string): Promise<boolean> {
 
 export function stageStatus(session: ReviewSession, stage: StageName): string {
   return session.stages[stage]?.status ?? "not_started";
+}
+
+/**
+ * The LaTeX source held for a session, or an error saying how to supply it.
+ *
+ * This is the whole of the opt-in. The stage cannot invent a source file, so a candidate who does
+ * not keep their resume in LaTeX, or does not want it touched, simply never produces one and the
+ * stage never runs. The message says that out loud so a caller does not go looking for a file.
+ */
+export function requireLatexSource(session: ReviewSession): StoredDocument {
+  const source = session.latex_source;
+  if (source) return source;
+  throw new Error(
+    `No LaTeX source held for session ${session.id}. Ask the candidate for the .tex file they ` +
+      `compile and pass it as latex_text or latex_path. If they do not keep their resume in ` +
+      `LaTeX, or do not want it edited, skip this stage — the review is complete without it. ` +
+      `Call export_dossier instead.`,
+  );
 }
 
 /** The stored result of a completed stage, or an error explaining how to complete it. */
