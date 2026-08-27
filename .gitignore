@@ -32,3 +32,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Built by `cd skills && zip -r batcave.zip batcave` for uploading to claude.ai.
+skills/*.zip

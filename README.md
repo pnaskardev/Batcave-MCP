@@ -60,6 +60,45 @@ the LaTeX stage separately.
 - **No keyword stuffing.** A keyword goes in only where real experience supports it; the rest are
   returned in `keywords_not_addressed` with the reason.
 
+## Running it as a skill instead
+
+`skills/batcave/SKILL.md` is the same four stages as a Claude Code skill — the briefs as markdown,
+no server, no Postgres, no session state. Use it for your own applications; the MCP server stays
+for anything that has to be reachable over the network.
+
+**On claude.ai** — zip the folder and upload it under Settings → Capabilities → Skills:
+
+```
+cd skills && zip -r batcave.zip batcave
+```
+
+Then attach your resume and the job posting to a conversation and ask it to tailor them.
+
+**In Claude Code** — symlink it, so the repo stays the source of truth and edits to `SKILL.md`
+are live immediately:
+
+```
+ln -s "$PWD/skills/batcave" ~/.claude/skills/batcave
+```
+
+The skill assumes nothing about its environment: it reads whatever you attach (PDF and DOCX
+included, no conversion step) and always returns the finished `.tex` as a fenced block you can
+copy. Where it has a filesystem it *also* saves `<resume>-<company>.tex` and offers the download;
+where it doesn't, the block alone is the whole result.
+
+**How it differs from the server:**
+
+| | MCP server | Skill |
+|---|---|---|
+| Stage order | Enforced by Postgres — stage 3 before stage 2 is impossible | Instructed, not enforced |
+| Output shape | Validated against zod; a 4-keyword report is rejected | Advisory |
+| Sessions | Persist in Postgres, resumable across machines | One conversation, no state |
+| LaTeX stage | Returns the source as text for you to copy | Writes `<resume>-<company>.tex` to disk |
+| Clients | Any MCP client, local or remote | Claude Code, on this machine |
+
+The skill edits files directly, which is why its stage 4 needs no `latex_text` / `latex_path`
+plumbing. Neither version compiles LaTeX or produces a PDF.
+
 ## Transports
 
 Two entrypoints, same tools:
